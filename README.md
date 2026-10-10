@@ -9,7 +9,7 @@ Personal use only. No pitch correction, no lyrics, no harmonies, no change to yo
 | Phase | State |
 | --- | --- |
 | 1. Repository and build | Done. Loads in Cubase Pro 12. Release tag not yet published |
-| 2. Pitch engine | Built, tests pass on Linux; awaiting Windows CI and your listening test |
+| 2. Pitch engine | Built, tests pass on Linux and Windows CI; awaiting your listening test in Cubase |
 | 3. Reference vocal to note blocks | Not started |
 | 4. Matching and colours | Not started |
 | 5. Piano roll display | Not started |

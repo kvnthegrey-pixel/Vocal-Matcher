@@ -1,6 +1,6 @@
 # Phase 2 report: pitch engine
 
-Status: **built and tested on Linux. Windows CI result and your listening test are still to come.**
+Status: **built and tested on Linux and on Windows (CI run 38034839479 passed, including the pitch tests). Your listening test in Cubase is the remaining gate.**
 
 ## What was done
 
@@ -37,7 +37,7 @@ Status: **built and tested on Linux. Windows CI result and your listening test a
 | Sines 110 / 220 / 440 / 880 Hz within 5 cents | Done | worst error 0.00 to 0.01 cents (McLeod), 0.00 to 0.11 (YIN). Also 123.47, 329.63, 1000 Hz and three 8-harmonic tones |
 | Silence and white noise give zero pitch points | Done | 0 voiced points for silence and for noise at three levels, both methods |
 | Measured processing delay documented | Done | see below |
-| Windows CI builds and runs the tests | **Open** | runs on push; result to be added here |
+| Windows CI builds and runs the tests | Done | run 38034839479: plugin build, tests, installer all passed. The test log itself could not be read from this session, so the Windows delay figures are not recorded |
 | Works in Cubase on a real voice | **Open, needs you** | see Gate |
 
 ## Measured delay
