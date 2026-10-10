@@ -1,6 +1,6 @@
 # Phase 1 report: repository and build
 
-Status: **built and checked on Linux; not yet pushed, not yet built on Windows, not yet loaded in Cubase.**
+Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet tagged, not yet loaded in Cubase.**
 
 ## Checklist against the strict document
 
@@ -11,11 +11,11 @@ Status: **built and checked on Linux; not yet pushed, not yet built on Windows, 
 | Plugin reports 0 samples latency | Done in code | `setLatencySamples (0)` |
 | Audio path leaves samples untouched | Done in code | `processBlock` is empty. The bit-exact unit test is a Phase 6 item |
 | VST3 builds | Checked on Linux only | `Vocal Assistor.vst3` produced by `VocalAssistor_VST3` |
-| GitHub Actions on windows-latest builds a Release .vst3 on every tag | Written, never run | `.github/workflows/build.yml` |
-| Zipped .vst3 folder and Inno Setup installer attached to the release | Written, never run | workflow zip step, `installer/VocalAssistor.iss`, release step |
-| Installer places the plugin in `C:\Program Files\Common Files\VST3` | Written, never run | `installer/VocalAssistor.iss` |
+| GitHub Actions on windows-latest builds a Release .vst3 | Done for pushes to main. The tag-triggered release step has not run yet | `.github/workflows/build.yml`, run 38032057781 |
+| Zipped .vst3 folder and Inno Setup installer | Built in CI and kept as a workflow artifact. Not attached to a release yet | workflow artifact `VocalAssistor-0.1.0-dev-win64` |
+| Installer places the plugin in `C:\Program Files\Common Files\VST3` | Built, not yet run on a machine | `installer/VocalAssistor.iss` |
 | Plain-text install guide with SmartScreen steps and Cubase scan | Done | `docs/INSTALL.txt` |
-| Semantic versioning, first tag `v0.1.0-alpha` | Not yet | needs a push |
+| Semantic versioning, first tag `v0.1.0-alpha` | Tag exists locally. Pushing it was refused (HTTP 403) by the session's policy | needs to be created on GitHub |
 | Pitch library builds under CMake | Done | `PitchSpike` target compiled and ran |
 | Plugin scans and loads in Cubase | **Open, needs you** | needs a Windows build from the workflow |
 
@@ -42,10 +42,14 @@ What this means for Phase 2:
 
 ## Not verified in this phase
 
-- Anything on Windows: MSVC build, the static runtime setting, the Inno Setup step, the release upload.
+- The release upload step (it only runs on a tag).
 - Loading in Cubase.
 - The installer on a machine with SmartScreen on.
 
 ## Gate
 
-Tag `v0.1.0-alpha`, then you confirm the empty plugin scans and loads in Cubase Pro 12. Phase 2 does not start before that.
+Create the `v0.1.0-alpha` tag on GitHub, then you confirm the empty plugin scans and loads in Cubase Pro 12. Phase 2 does not start before that.
+
+## Fixes made on the way
+
+The first CI run failed at Configure for two reasons, both fixed: the workflow named a Visual Studio version the runner does not have, and PowerShell split the `-DVA_VERSION_LABEL` argument at its dots.

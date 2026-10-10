@@ -8,7 +8,7 @@ Personal use only. No pitch correction, no lyrics, no harmonies, no change to yo
 
 | Phase | State |
 | --- | --- |
-| 1. Repository and build | Written, checked on Linux, awaiting first Windows build and Cubase load test |
+| 1. Repository and build | Windows build passes in CI; awaiting tag and Cubase load test |
 | 2. Pitch engine | Not started |
 | 3. Reference vocal to note blocks | Not started |
 | 4. Matching and colours | Not started |
