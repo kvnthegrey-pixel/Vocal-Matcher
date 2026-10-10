@@ -1,6 +1,6 @@
 # Phase 3 report: reference vocal to note blocks
 
-Status: **built, and all tests pass on Linux. Windows CI result and your test in Cubase are still to come.**
+Status: **built, and all tests pass on Linux and on Windows (CI run 38039868053: plugin, installer, PitchTests, BlockTests and HostTests all passed). Your test in Cubase is the remaining gate.**
 
 ## What was done
 
@@ -45,7 +45,7 @@ Status: **built, and all tests pass on Linux. Windows CI result and your test in
 | Parameters and blocks stored in the project state | Done | 200 blocks round-trip through XML; a fresh plugin instance restores them without analysing |
 | Analysis Quality indicator, three colours | Done | see the numbers below |
 | Works in Cubase (file dialog, window, save and reopen) | **Open, needs you** | see Gate |
-| Windows CI builds and runs the tests | **Open** | runs on push |
+| Windows CI builds and runs the tests | Done | run 38039868053 |
 
 ## Decisions I made where the document was silent
 
@@ -87,7 +87,6 @@ need your real stems to tune.
 - The file chooser, the MIDI track menu and the progress bar inside Cubase on Windows (only
   checked headlessly).
 - Loading a real vocal MIDI file (I only had your FLAC stem and my own generated MIDI).
-- Windows build and test run (result to be added).
 
 ## Gate
 

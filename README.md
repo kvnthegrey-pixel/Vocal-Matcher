@@ -10,7 +10,7 @@ Personal use only. No pitch correction, no lyrics, no harmonies, no change to yo
 | --- | --- |
 | 1. Repository and build | Done. Loads in Cubase Pro 12. Release tag not yet published |
 | 2. Pitch engine | Done. Confirmed reading a note in Cubase |
-| 3. Reference vocal to note blocks | Built, tests pass on Linux; awaiting Windows CI and your test in Cubase |
+| 3. Reference vocal to note blocks | Built, tests pass on Linux and Windows CI; awaiting your test in Cubase |
 | 4. Matching and colours | Not started |
 | 5. Piano roll display | Not started |
 | 6. Cubase sync and saved state | Not started |
