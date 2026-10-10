@@ -24,12 +24,13 @@ void setupSlider (juce::Slider& s, juce::Label& l, const juce::String& text, juc
 
 VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
-      methodAttach (p.apvts, "method", methodBox),
       mcAttach (p.apvts, "gateMcLeod", gateMcLeod),
       yinAttach (p.apvts, "gateYin", gateYin),
       latAttach (p.apvts, "latencyMs", latency)
 {
+    // Items must exist before the attachment is made, or nothing is selected.
     methodBox.addItemList ({ "McLeod", "YIN" }, 1);
+    methodAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "method", methodBox);
     addAndMakeVisible (methodBox);
     methodLabel.setText ("Pitch method", juce::dontSendNotification);
     methodLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb8bcc6));

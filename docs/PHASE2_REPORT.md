@@ -65,6 +65,10 @@ never delays your audio.
 - White noise and clean speech-like consonants are rejected by the gate. Breathy vocals may
   need the gate lowered, which is why it is a control.
 
+## Found in your first Cubase screenshot
+
+The Phase 2 window opened, but the pitch method dropdown was blank. The dropdown was linked to its setting before its items were added, so nothing showed as selected (McLeod was still the active default). Fixed by adding the items first.
+
 ## Gate
 
 Install the new build (same steps as before), put it on the vocal track, and check:

@@ -22,7 +22,7 @@ private:
     juce::ComboBox methodBox;
     juce::Slider gateMcLeod, gateYin, latency;
     juce::Label methodLabel, gateMcLeodLabel, gateYinLabel, latencyLabel;
-    juce::AudioProcessorValueTreeState::ComboBoxAttachment methodAttach;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> methodAttach;
     juce::AudioProcessorValueTreeState::SliderAttachment mcAttach, yinAttach, latAttach;
 
     va::PitchPoint latest;
