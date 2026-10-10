@@ -11,6 +11,18 @@ VocalAssistorProcessor::VocalAssistorProcessor()
     methodParam     = apvts.getRawParameterValue ("method");
     mcleodGateParam = apvts.getRawParameterValue ("gateMcLeod");
     yinGateParam    = apvts.getRawParameterValue ("gateYin");
+    keyParam        = apvts.getRawParameterValue ("key");
+    scaleParam      = apvts.getRawParameterValue ("scale");
+    octaveParam     = apvts.getRawParameterValue ("octave");
+    offsetParam     = apvts.getRawParameterValue ("refOffset");
+    greenParam      = apvts.getRawParameterValue ("greenCents");
+    amberParam      = apvts.getRawParameterValue ("amberCents");
+    a4Param         = apvts.getRawParameterValue ("a4");
+    latencyParam    = apvts.getRawParameterValue ("latencyMs");
+
+    reference.addChangeListener (this);
+    matcherObj.setSettings (currentMatchSettings());
+    startTimerHz (30);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout VocalAssistorProcessor::createLayout()
@@ -25,6 +37,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalAssistorProcessor::crea
                                                       NormalisableRange<float> (0.05f, 0.40f, 0.01f), va::PitchTracker::defaultYinGate));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "latencyMs", 1 }, "Live trace latency compensation",
                                                       NormalisableRange<float> (-50.0f, 50.0f, 0.5f), 0.0f));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "key", 1 }, "Key",
+                                                       StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale",
+                                                       StringArray { "Off", "Major", "Minor" }, 0));
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { "octave", 1 }, "Reference octave shift", -2, 2, 0));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "refOffset", 1 }, "Reference start in project (s)",
+                                                      NormalisableRange<float> (-60.0f, 600.0f, 0.01f), 0.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "greenCents", 1 }, "Green threshold (cents)",
+                                                      NormalisableRange<float> (5.0f, 50.0f, 1.0f), 25.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "amberCents", 1 }, "Amber threshold (cents)",
+                                                      NormalisableRange<float> (50.0f, 200.0f, 1.0f), 100.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "a4", 1 }, "A4 reference (Hz)",
+                                                      NormalisableRange<float> (430.0f, 450.0f, 0.1f), 440.0f));
     return layout;
 }
 
@@ -32,6 +57,7 @@ void VocalAssistorProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 {
     // The audio is never delayed, so no latency is reported to the host.
     setLatencySamples (0);
+    currentSampleRate = sampleRate;
     engine.start (sampleRate, samplesPerBlock);
 }
 
@@ -56,7 +82,22 @@ void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                                                  : va::PitchTracker::Method::Yin);
     engine.setMcLeodGate (mcleodGateParam->load());
     engine.setYinGate (yinGateParam->load());
-    engine.pushAudio (buffer);
+
+    int64_t hostSample = 0;
+    bool playing = false;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+        {
+            playing = pos->getIsPlaying();
+            if (auto s = pos->getTimeInSamples())
+                hostSample = *s;
+            else
+                playing = false;
+        }
+    hostSampleAtBlock = hostSample;
+    hostWallMs = juce::Time::getMillisecondCounterHiRes();
+    hostPlaying = playing;
+    engine.pushAudio (buffer, hostSample, playing);
 }
 
 juce::String VocalAssistorProcessor::loadReferenceMidi (const juce::File& file, int trackIndex)
@@ -85,25 +126,112 @@ bool VocalAssistorProcessor::loadReferenceAudio (const juce::File& file)
     const auto info = reference.infoCopy();
     if (! job.start (file, va::SegmenterRules(), va::PyinSettings()))
         return false;
-    startTimerHz (10);
     juce::ignoreUnused (info);
     return true;
 }
 
+va::MatchSettings VocalAssistorProcessor::currentMatchSettings() const
+{
+    va::MatchSettings s;
+    s.greenCents = greenParam->load();
+    s.amberCents = std::max ((double) amberParam->load(), s.greenCents);
+    s.a4 = a4Param->load();
+    s.octaveShift = (int) std::lround (octaveParam->load());
+    s.refOffsetSec = offsetParam->load();
+    return s;
+}
+
+va::ViewSettings VocalAssistorProcessor::viewSettings() const
+{
+    va::ViewSettings v;
+    v.refOffsetSec = offsetParam->load();
+    v.octaveShift = (int) std::lround (octaveParam->load());
+    v.keyRoot = (int) std::lround (keyParam->load());
+    v.scale = (int) std::lround (scaleParam->load());
+    v.a4 = a4Param->load();
+    return v;
+}
+
+double VocalAssistorProcessor::playheadSeconds() const
+{
+    const double sr = currentSampleRate.load();
+    double t = (double) hostSampleAtBlock.load() / sr;
+    if (hostPlaying.load())
+        t += juce::jlimit (0.0, 0.25, (juce::Time::getMillisecondCounterHiRes() - hostWallMs.load()) * 0.001);
+    return t;
+}
+
+void VocalAssistorProcessor::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    matcherObj.setBlocks (reference.blocksCopy().blocks());
+    matcherObj.setSettings (currentMatchSettings());
+}
+
+void VocalAssistorProcessor::updatePerformance()
+{
+    const auto settings = currentMatchSettings();
+    if (! (settings == matcherObj.settings()))
+    {
+        if (settings.a4 != matcherObj.settings().a4)
+            traceStore.clear();          // trace heights were computed at the old A4
+        matcherObj.setSettings (settings);
+    }
+
+    const double sr = engine.getSampleRate();
+    const double latencySec = (double) latencyParam->load() * 0.001;
+    const double frameSec = (double) va::PitchTracker::hopSize / sr;
+
+    va::PitchPoint pts[256];
+    int n;
+    while ((n = engine.popPoints (pts, 256)) > 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& p = pts[i];
+            latestPoint = p;
+            haveLatestPoint = true;
+            if (! p.hostValid)
+                continue;
+
+            if (p.passId != lastPassId)
+            {
+                lastPassId = p.passId;
+                const double start = (double) (p.hostSample) / sr + latencySec;
+                traceStore.eraseFrom (start);
+                matcherObj.resetFrom (start);
+            }
+
+            const double t = (double) p.hostSample / sr + latencySec;
+            va::TracePoint tp;
+            tp.timeSec = t;
+            tp.voiced = p.voiced;
+            if (p.voiced)
+            {
+                tp.midi = (float) (69.0 + 12.0 * std::log2 ((double) p.hz / settings.a4));
+                tp.confidence = methodParam->load() < 0.5f ? juce::jlimit (0.0f, 1.0f, p.confidence)
+                                                           : juce::jlimit (0.0f, 1.0f, 1.0f - p.confidence);
+            }
+            traceStore.add (tp);
+            matcherObj.onPoint (t, frameSec, p.voiced, p.voiced ? (double) p.hz : 0.0);
+        }
+    }
+
+    matcherObj.onPlayhead (playheadSeconds());
+}
+
 void VocalAssistorProcessor::timerCallback()
 {
+    updatePerformance();
+
     va::AudioAnalysisResult result;
     if (job.takeResult (result))
     {
-        stopTimer();
         if (result.ok)
             reference.setReference (std::move (result.blocks), result.info);
         else if (! result.cancelled)
             analysisError = result.error.isNotEmpty() ? result.error : juce::String ("The analysis failed.");
         reference.sendChangeMessage();
     }
-    else if (! job.isRunning())
-        stopTimer();
 }
 
 juce::AudioProcessorEditor* VocalAssistorProcessor::createEditor()
@@ -136,6 +264,8 @@ void VocalAssistorProcessor::setStateInformation (const void* data, int sizeInBy
                 reference.fromValueTree (ref);       // exact blocks back, no re-analysis
             }
             apvts.replaceState (tree);
+            matcherObj.setBlocks (reference.blocksCopy().blocks());
+            matcherObj.setSettings (currentMatchSettings());
         }
     }
 }

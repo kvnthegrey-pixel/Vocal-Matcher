@@ -12,8 +12,8 @@ class PitchEngine final : private juce::Thread
 {
 public:
     PitchEngine() : juce::Thread ("Vocal Assistor pitch"),
-                    audioFifo (fifoSize), pointFifo (pointFifoSize),
-                    audioStore ((size_t) fifoSize, 0.0f), pointStore ((size_t) pointFifoSize),
+                    audioFifo (fifoSize), pointFifo (pointFifoSize), descFifo (descFifoSize),
+                    audioStore ((size_t) fifoSize, 0.0f), pointStore ((size_t) pointFifoSize), descStore ((size_t) descFifoSize),
                     chunk ((size_t) chunkSize, 0.0f), mono ((size_t) 8192, 0.0f)
     {}
 
@@ -27,6 +27,10 @@ public:
         mono.assign ((size_t) monoCapacity, 0.0f);
         audioFifo.reset();
         pointFifo.reset();
+        descFifo.reset();
+        pushedSamples = 0;
+        consumed = 0;
+        anchorHost = 0; anchorPlaying = false; passId = 0; havePending = false;
         tracker.prepare (sampleRate);
         applySettings();
         droppedSamples = 0;
@@ -47,13 +51,27 @@ public:
     void setYinGate (float g)               { yinGate = g; }
 
     // ---- audio thread ---------------------------------------------------
-    /** Mixes the block down to mono and queues it. Reads the buffer only. */
-    void pushAudio (const juce::AudioBuffer<float>& buffer) noexcept
+    /** Mixes the block down to mono and queues it. Reads the buffer only.
+        Transport stopped / unknown. */
+    void pushAudio (const juce::AudioBuffer<float>& buffer) noexcept { pushAudio (buffer, 0, false); }
+
+    /** Same, and tells the worker where this block sits on the host timeline. */
+    void pushAudio (const juce::AudioBuffer<float>& buffer, int64_t hostSample, bool playing) noexcept
     {
         const int n = buffer.getNumSamples();
         const int chans = buffer.getNumChannels();
         if (chans == 0 || n == 0 || ! isThreadRunning())
             return;
+
+        {
+            int a, b, c, d;
+            descFifo.prepareToWrite (1, a, b, c, d);
+            if (b > 0)
+            {
+                descStore[(size_t) a] = { pushedSamples.load(), hostSample, playing };
+                descFifo.finishedWrite (1);
+            }
+        }
 
         int done = 0;
         while (done < n)
@@ -78,6 +96,7 @@ public:
             std::copy (m, m + n1, audioStore.begin() + s1);
             if (n2 > 0) std::copy (m + n1, m + n1 + n2, audioStore.begin() + s2);
             audioFifo.finishedWrite (n1 + n2);
+            pushedSamples.fetch_add (n1 + n2);
             if (n1 + n2 < count)
                 droppedSamples += count - (n1 + n2);
             done += count;
@@ -105,7 +124,8 @@ public:
     }
 
 private:
-    static constexpr int fifoSize = 1 << 16;      // about 1.4 s of audio
+    static constexpr int fifoSize = 1 << 17;      // about 2.7 s of audio
+    static constexpr int descFifoSize = 4096;
     static constexpr int pointFifoSize = 4096;
     static constexpr int chunkSize = 1024;
 
@@ -114,6 +134,29 @@ private:
         tracker.setMethod ((PitchTracker::Method) method.load());
         tracker.setMcLeodGate (mcleodGate.load());
         tracker.setYinGate (yinGate.load());
+    }
+
+    struct BlockDesc { int64_t streamIndex = 0; int64_t hostSample = 0; bool playing = false; };
+
+    /** Applies one block descriptor: a new pass starts whenever playback begins
+        or the host position is not where continuous playback would put it. */
+    void applyDescriptor (const BlockDesc& d)
+    {
+        if (! d.playing)
+        {
+            anchorPlaying = false;
+            return;
+        }
+        const int64_t expected = anchorHost + (consumed - anchorStream);
+        const bool continuous = anchorPlaying && std::llabs (d.hostSample - expected) <= 4;
+        if (! continuous)
+        {
+            ++passId;
+            tracker.reset();
+            anchorStream = consumed;
+            anchorHost = d.hostSample;
+            anchorPlaying = true;
+        }
     }
 
     void run() override
@@ -129,18 +172,42 @@ private:
                 applySettings();
             }
 
+            // Apply every descriptor that starts at or before the samples consumed so far.
+            for (;;)
+            {
+                if (! havePending)
+                {
+                    if (descFifo.getNumReady() == 0) break;
+                    int s1, n1, s2, n2;
+                    descFifo.prepareToRead (1, s1, n1, s2, n2);
+                    pending = descStore[(size_t) s1];
+                    descFifo.finishedRead (1);
+                    havePending = true;
+                }
+                if (pending.streamIndex > consumed) break;
+                applyDescriptor (pending);
+                havePending = false;
+            }
+
             const int ready = audioFifo.getNumReady();
             if (ready == 0) { wait (2); continue; }
 
-            const int count = std::min (ready, chunkSize);
+            int count = std::min (ready, chunkSize);
+            if (havePending)
+                count = (int) std::min<int64_t> (count, pending.streamIndex - consumed);
+            if (count <= 0) { wait (1); continue; }
             int s1, n1, s2, n2;
             audioFifo.prepareToRead (count, s1, n1, s2, n2);
             std::copy (audioStore.begin() + s1, audioStore.begin() + s1 + n1, chunk.begin());
             if (n2 > 0) std::copy (audioStore.begin() + s2, audioStore.begin() + s2 + n2, chunk.begin() + n1);
             audioFifo.finishedRead (n1 + n2);
+            consumed += n1 + n2;
 
-            tracker.process (chunk.data(), n1 + n2, [this] (const PitchPoint& p)
+            tracker.process (chunk.data(), n1 + n2, [this] (PitchPoint p)
             {
+                p.hostValid = anchorPlaying;
+                p.hostSample = anchorHost + p.centreSample;
+                p.passId = passId;
                 int a, b, c, d;
                 pointFifo.prepareToWrite (1, a, b, c, d);
                 if (b > 0) { pointStore[(size_t) a] = p; pointFifo.finishedWrite (1); }
@@ -149,9 +216,16 @@ private:
     }
 
     PitchTracker tracker;
-    juce::AbstractFifo audioFifo, pointFifo;
+    juce::AbstractFifo audioFifo, pointFifo, descFifo;
     std::vector<float> audioStore;
     std::vector<PitchPoint> pointStore;
+    std::vector<BlockDesc> descStore;
+    std::atomic<int64_t> pushedSamples { 0 };
+    // worker-thread state
+    int64_t consumed = 0, anchorStream = 0, anchorHost = 0;
+    bool anchorPlaying = false, havePending = false;
+    int passId = 0;
+    BlockDesc pending;
     std::vector<float> chunk, mono;
     int monoCapacity = 8192;
     double sr = 48000.0;

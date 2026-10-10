@@ -15,11 +15,14 @@ juce::String noteLabel (int midi)
 }
 }
 
-BlockEditor::BlockEditor (ReferenceModel& m) : model (m)
+BlockEditor::BlockEditor (ReferenceModel& m, PerformanceSource& p) : model (m), perf (p)
 {
     model.addChangeListener (this);
     snapshot = model.blocksCopy();
+    lastOctave = perf.viewSettings().octaveShift;
     fitAll();
+    pxPerSec = 100.0;          // performance zoom: about ten seconds across the window
+    following = true;
 }
 
 BlockEditor::~BlockEditor() { model.removeChangeListener (this); }
@@ -41,20 +44,26 @@ void BlockEditor::changeListenerCallback (juce::ChangeBroadcaster*)
     snapshot = model.blocksCopy();
     pruneSelection();
     if (! hadBlocks && ! snapshot.empty())
+    {
         fitAll();
+        pxPerSec = 100.0;
+        setFollow (true);
+    }
     repaint();
     if (onSelectionChanged) onSelectionChanged();
 }
 
 void BlockEditor::fitAll()
 {
+    const auto vs = perf.viewSettings();
+    const int shift = 12 * vs.octaveShift;
     if (snapshot.empty()) { lowMidi = 48; highMidi = 84; viewStartSec = 0.0; pxPerSec = 40.0; return; }
     int lo = 127, hi = 0;
     double firstSec = 1.0e9, lastSec = 0.0;
     for (auto& b : snapshot.blocks())
     {
-        lo = std::min (lo, (int) std::floor (b.midi())); hi = std::max (hi, (int) std::ceil (b.midi()));
-        firstSec = std::min (firstSec, b.startSec()); lastSec = std::max (lastSec, b.endSec());
+        lo = std::min (lo, (int) std::floor (b.midi()) + shift); hi = std::max (hi, (int) std::ceil (b.midi()) + shift);
+        firstSec = std::min (firstSec, b.startSec() + vs.refOffsetSec); lastSec = std::max (lastSec, b.endSec() + vs.refOffsetSec);
     }
     lowMidi = std::max (0, lo - 4);
     highMidi = std::min (127, hi + 4);
@@ -62,12 +71,45 @@ void BlockEditor::fitAll()
     viewStartSec = std::max (0.0, firstSec - 0.5);
     const double span = std::max (2.0, lastSec - viewStartSec + 0.5);
     pxPerSec = juce::jlimit (4.0, 400.0, (double) (getWidth() - labelWidth) / span);
+    lastOctave = vs.octaveShift;
+    following = false;
+    if (onFollowChanged) onFollowChanged();
+    repaint();
+}
+
+void BlockEditor::setFollow (bool on)
+{
+    if (following == on) return;
+    following = on;
+    if (on) tick();
+    if (onFollowChanged) onFollowChanged();
+    repaint();
+}
+
+void BlockEditor::tick()
+{
+    const auto vs = perf.viewSettings();
+    if (vs.octaveShift != lastOctave)
+    {
+        const int d = 12 * (vs.octaveShift - lastOctave);
+        lowMidi = juce::jlimit (0, 100, lowMidi + d);
+        highMidi = juce::jlimit (lowMidi + 24, 127, highMidi + d);
+        lastOctave = vs.octaveShift;
+    }
+
+    const bool playing = perf.isPlaying();
+    if (playing && ! wasPlaying)
+        setFollow (true);
+    wasPlaying = playing;
+
+    if (following)
+        viewStartSec = perf.playheadSeconds() - (double) (getWidth() - labelWidth) * followFraction / pxPerSec;
     repaint();
 }
 
 void BlockEditor::keepInRange()
 {
-    viewStartSec = std::max (-1.0, viewStartSec);
+    viewStartSec = std::max (-60.0, viewStartSec);
     pxPerSec = juce::jlimit (4.0, 600.0, pxPerSec);
 }
 
@@ -79,9 +121,16 @@ void BlockEditor::paint (juce::Graphics& g)
     const float rowH = (float) area.getHeight() / rows;
     auto yOf = [&] (double midi) { return (float) area.getHeight() - ((float) midi - (float) lowMidi + 1.0f) * rowH; };
 
+    const auto vs = perf.viewSettings();
+    const int octShift = 12 * vs.octaveShift;
+    const double off = vs.refOffsetSec;
+
     for (int m = lowMidi; m <= highMidi; ++m)
     {
-        g.setColour (isBlackKey (m) ? juce::Colour (0xff15171c) : juce::Colour (0xff1c1f26));
+        if (vs.scale != 0)
+            g.setColour (inScale (m % 12, vs.keyRoot, vs.scale) ? juce::Colour (0xff2a2f3a) : juce::Colour (0xff121419));
+        else
+            g.setColour (isBlackKey (m) ? juce::Colour (0xff15171c) : juce::Colour (0xff1c1f26));
         g.fillRect ((float) labelWidth, yOf (m), (float) area.getWidth() - labelWidth, rowH);
         if (m % 12 == 0)
         {
@@ -106,27 +155,75 @@ void BlockEditor::paint (juce::Graphics& g)
     // Blocks.
     g.saveState();
     g.reduceClipRegion (labelWidth, 0, area.getWidth() - labelWidth, area.getHeight());
+    const auto& matcher = perf.matcher();
     for (auto& b : snapshot.blocks())
     {
-        const float x0 = secToX (b.startSec()), x1 = secToX (b.endSec());
+        const float x0 = secToX (b.startSec() + off), x1 = secToX (b.endSec() + off);
         if (x1 < (float) labelWidth || x0 > (float) area.getWidth()) continue;
-        const float y = yOf (b.midi());
+        const float y = yOf (b.midi() + octShift);
         juce::Rectangle<float> r (x0, y + 1.0f, std::max (2.0f, x1 - x0), rowH - 2.0f);
         const bool sel = selection.count (b.id) > 0;
-        g.setColour (sel ? juce::Colour (0xffffd166) : juce::Colour (0xff4a90e2));
+        juce::Colour fill, edge;
+        switch (matcher.stateOf (b.id))
+        {
+            case BlockState::Green: fill = juce::Colour (0xff4caf50); edge = juce::Colour (0xff9be29f); break;
+            case BlockState::Amber: fill = juce::Colour (0xffffb300); edge = juce::Colour (0xffffd980); break;
+            case BlockState::Red:   fill = juce::Colour (0xfff44336); edge = juce::Colour (0xffff9a92); break;
+            default:                fill = juce::Colour (0xff4a90e2); edge = juce::Colour (0xff9cc6f5); break;
+        }
+        g.setColour (fill);
         g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (sel ? juce::Colours::white : juce::Colour (0xff9cc6f5));
-        g.drawRoundedRectangle (r, 3.0f, sel ? 2.0f : 1.0f);
+        g.setColour (sel ? juce::Colours::white : edge);
+        g.drawRoundedRectangle (r, 3.0f, sel ? 3.0f : 1.0f);
         if (r.getWidth() > 34.0f && rowH > 11.0f)
         {
             g.setColour (juce::Colours::black);
             g.setFont (juce::FontOptions (juce::jmin (12.0f, rowH - 3.0f)));
-            g.drawText (noteLabel ((int) std::lround (b.midi())), r.reduced (3.0f, 0.0f), juce::Justification::centredLeft);
+            g.drawText (noteLabel ((int) std::lround (b.midi()) + octShift), r.reduced (3.0f, 0.0f), juce::Justification::centredLeft);
         }
     }
+    // The live pitch line: thin, brighter where the detector is more confident,
+    // broken wherever there is no pitch.
+    {
+        const auto& pts = perf.trace().points();
+        const double t0 = xToSec ((float) labelWidth) - 0.1, t1 = xToSec ((float) area.getWidth()) + 0.1;
+        size_t i = perf.trace().lowerBound (t0);
+        const size_t stride = (size_t) std::max (1.0, std::floor (1.0 / pxPerSec / 0.0053));     // about one point per pixel
+        const float half = rowH * 0.5f;
+        bool havePrev = false;
+        float px = 0, py = 0;
+        double pt = 0;
+        for (; i < pts.size() && pts[i].timeSec <= t1; i += stride)
+        {
+            const auto& p = pts[i];
+            if (! p.voiced) { havePrev = false; continue; }
+            const float x = secToX (p.timeSec);
+            const float y = yOf ((double) p.midi) + half;
+            if (havePrev && p.timeSec - pt < 0.03)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.45f));
+                g.drawLine (px, py, x, y, 4.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.35f + 0.65f * p.confidence));
+                g.drawLine (px, py, x, y, 2.0f);
+            }
+            px = x; py = y; pt = p.timeSec; havePrev = true;
+        }
+    }
+
+    // The stationary playhead.
+    {
+        const float x = secToX (perf.playheadSeconds());
+        if (x >= (float) labelWidth && x <= (float) area.getWidth())
+        {
+            g.setColour (juce::Colour (0xffff5252));
+            g.drawVerticalLine ((int) x, 0.0f, (float) area.getHeight());
+            g.fillRect (x - 1.0f, 0.0f, 3.0f, (float) area.getHeight());
+        }
+    }
+
     if (cursorUs >= 0)
     {
-        const float x = secToX ((double) cursorUs * 1.0e-6);
+        const float x = secToX ((double) cursorUs * 1.0e-6 + off);
         g.setColour (juce::Colours::white.withAlpha (0.8f));
         g.drawVerticalLine ((int) x, 0.0f, (float) area.getHeight());
     }
@@ -152,13 +249,14 @@ void BlockEditor::paint (juce::Graphics& g)
 void BlockEditor::mouseDown (const juce::MouseEvent& e)
 {
     if (e.x < labelWidth) return;
-    const int64_t us = (int64_t) std::llround (xToSec ((float) e.x) * 1.0e6);
+    const auto vs = perf.viewSettings();
+    const int64_t us = (int64_t) std::llround ((xToSec ((float) e.x) - vs.refOffsetSec) * 1.0e6);     // reference time
     const float rowH = (float) getHeight() / (float) (highMidi - lowMidi + 1);
     const double midiAtMouse = (double) lowMidi + ((double) getHeight() - (double) e.y) / (double) rowH - 1.0;
 
     int hit = -1;
     for (auto& b : snapshot.blocks())
-        if (us >= b.startUs && us < b.endUs && std::abs (b.midi() - midiAtMouse) < 0.75) { hit = b.id; break; }
+        if (us >= b.startUs && us < b.endUs && std::abs (b.midi() + 12 * vs.octaveShift - midiAtMouse) < 0.75) { hit = b.id; break; }
 
     if (hit >= 0)
     {
@@ -188,6 +286,7 @@ void BlockEditor::mouseDown (const juce::MouseEvent& e)
 void BlockEditor::mouseDrag (const juce::MouseEvent& e)
 {
     if (! dragPanning) return;
+    if (std::abs (e.getDistanceFromDragStartX()) > 3) setFollow (false);
     viewStartSec = dragStartViewSec - (double) e.getDistanceFromDragStartX() / pxPerSec;
     keepInRange();
     repaint();
@@ -198,12 +297,17 @@ void BlockEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     if (e.mods.isCtrlDown() || e.mods.isCommandDown())
     {
         const double before = xToSec ((float) e.x);
+        const double anchorPx = following ? (double) (getWidth() - labelWidth) * followFraction : (double) (e.x - labelWidth);
+        const double anchorSec = following ? perf.playheadSeconds() : before;
         pxPerSec *= std::pow (1.25, (double) w.deltaY * 4.0);
         keepInRange();
-        viewStartSec = before - (double) (e.x - labelWidth) / pxPerSec;
+        viewStartSec = anchorSec - anchorPx / pxPerSec;
     }
     else
+    {
+        setFollow (false);
         viewStartSec -= (double) (w.deltaX != 0.0f ? w.deltaX : w.deltaY) * 600.0 / pxPerSec;
+    }
     keepInRange();
     repaint();
 }

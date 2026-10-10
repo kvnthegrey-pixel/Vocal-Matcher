@@ -2,6 +2,7 @@
 // and the pYIN audio analysis on synthetic singing. Exit code 0 only if all pass.
 #include "../Source/ReferenceJob.h"
 #include "../Source/MidiReference.h"
+#include "../Source/Matcher.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -390,6 +391,60 @@ int main()
                      qualityName (r.info.quality), r.info.meanClarity, r.info.voicedFraction, r.info.coverage);
         for (size_t i = 0; i < std::min<size_t> (r.blocks.size(), 40); ++i)
             std::printf ("       %7.3f - %7.3f  midi %.0f\n", r.blocks[i].startSec(), r.blocks[i].endSec(), r.blocks[i].midi());
+    }
+
+    std::printf ("\n== Phase 4: colour state machine ==\n");
+    {
+        auto blk = [] (int id, double s, double e, int midi) { NoteBlock b; b.id = id; b.startUs = (int64_t) (s * 1e6); b.endUs = (int64_t) (e * 1e6); b.midiMilli = midi * 1000; return b; };
+        auto hzOf = [] (double midi, double cents = 0.0, double a4 = 440.0) { return a4 * std::pow (2.0, (midi - 69.0 + cents / 100.0) / 12.0); };
+        const double fr = 0.005;
+        // feed frames from t0 to t1 at a pitch offset (cents), voiced
+        auto feed = [&] (Matcher& m, double t0, double t1, double midi, double cents, bool voiced = true)
+        { for (double t = t0; t < t1 - 1e-9; t += fr) m.onPoint (t, fr, voiced, voiced ? hzOf (midi, cents) : 0.0); };
+
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) });
+          check (m.stateOf (1) == BlockState::Blue, "Blue before the playhead reaches the block");
+          feed (m, 1.0, 2.0, 60, 10); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Green, "10 cents off for the whole block: Green"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 2.0, 60, 60); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Amber, "60 cents off: Amber"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 2.0, 60, 150); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Red, "150 cents off: Red"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 2.0, 60, 0, false); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Red, "no pitch detected: Red"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 1.4, 60, 0); feed (m, 1.4, 2.0, 60, 150); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Red, "green for only 40% of the block: not Green (Amber needs 50% too): Red"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 1.6, 60, 0); feed (m, 1.6, 2.0, 60, 150); m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Green, "green for 60% of the block: Green"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 1.6, 60, 0); feed (m, 1.6, 2.0, 60, 150);
+          check (m.stateOf (1) == BlockState::Green, "...already Green while still inside the block");
+          m.onPlayhead (3.0);
+          check (m.stateOf (1) == BlockState::Green, "...and an earned colour is never lost"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); feed (m, 1.0, 1.3, 60, 0);
+          check (m.stateOf (1) == BlockState::Green, "while active with nothing earned: the instant colour (Green)");
+          feed (m, 1.3, 1.4, 60, 150);
+          check (m.stateOf (1) == BlockState::Red, "...then Red when the singer goes off"); }
+        { Matcher m; m.setBlocks ({ blk (1, 0, 1, 60), blk (2, 1, 4, 62) });
+          feed (m, 0.0, 1.0, 60, 0); feed (m, 1.0, 4.0, 62, 150);
+          check (m.accuracyPercent() == 25, "accuracy is time-weighted: 1 s green of 4 s is 25%, not 50%"); }
+        { MatchSettings s; s.a4 = 442.0;
+          Matcher n; n.setSettings (s); n.setBlocks ({ blk (1, 0, 1, 69) });
+          for (double t = 0; t < 1.0; t += fr) n.onPoint (t, fr, true, 442.0); n.onPlayhead (2.0);
+          check (n.stateOf (1) == BlockState::Green, "A4 = 442: singing 442 Hz on the A block is Green"); }
+        { Matcher m; MatchSettings s; s.greenCents = 5.0; m.setSettings (s); m.setBlocks ({ blk (1, 0, 1, 60) });
+          feed (m, 0.0, 1.0, 60, 10); m.onPlayhead (2.0);
+          check (m.stateOf (1) == BlockState::Amber, "green slider at 5 cents: 10 cents off is only Amber"); }
+        { Matcher m; MatchSettings s; s.octaveShift = 1; m.setSettings (s); m.setBlocks ({ blk (1, 0, 1, 60) });
+          for (double t = 0; t < 1.0; t += fr) m.onPoint (t, fr, true, 523.2511); m.onPlayhead (2.0);
+          check (m.stateOf (1) == BlockState::Green, "octave +1: 523.25 Hz matches the C4 block"); }
+        { Matcher m; m.setBlocks ({ blk (1, 0, 1, 60), blk (2, 1, 2, 60) });
+          feed (m, 0.0, 1.0, 60, 0); feed (m, 1.0, 2.0, 60, 150); m.onPlayhead (3.0);
+          m.resetFrom (1.0);
+          check (m.stateOf (1) == BlockState::Green && m.stateOf (2) == BlockState::Blue, "resetFrom(1 s): earlier block keeps its result, later one is cleared");
+          check (m.accuracyPercent() == 100, "accuracy is recomputed after a reset"); }
+        { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); MatchSettings s; s.refOffsetSec = 10.0; m.setSettings (s);
+          feed (m, 11.0, 12.0, 60, 0); m.onPlayhead (13.0);
+          check (m.stateOf (1) == BlockState::Green, "reference offset 10 s: the block is measured at 11 to 12 s"); }
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL BLOCK TESTS PASSED" : "BLOCK TESTS FAILED", failures, failures == 1 ? "" : "s");

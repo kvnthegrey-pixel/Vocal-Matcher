@@ -41,16 +41,25 @@ juce::Colour qualityColour (va::Quality q)
 }
 
 VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), blockEditor (p.reference),
+    : AudioProcessorEditor (&p), proc (p), blockEditor (p.reference, p),
       mcAttach (p.apvts, "gateMcLeod", gateMcLeod),
       yinAttach (p.apvts, "gateYin", gateYin),
-      latAttach (p.apvts, "latencyMs", latency)
+      latAttach (p.apvts, "latencyMs", latency),
+      octAttach (p.apvts, "octave", octave),
+      offAttach (p.apvts, "refOffset", offset),
+      greenAttach (p.apvts, "greenCents", greenCents),
+      amberAttach (p.apvts, "amberCents", amberCents),
+      a4Attach (p.apvts, "a4", a4)
 {
     addAndMakeVisible (blockEditor);
     for (auto* b : { &loadButton, &bigLoadButton, &exportButton, &undoButton, &lockButton, &splitButton, &mergeButton,
                      &deleteButton, &downButton, &upButton, &fitButton, &cancelButton })
         addAndMakeVisible (*b);
     addChildComponent (progressBar);
+    addAndMakeVisible (followButton);
+    followButton.setToggleState (true, juce::dontSendNotification);
+    followButton.onClick = [this] { blockEditor.setFollow (followButton.getToggleState()); };
+    blockEditor.onFollowChanged = [this] { followButton.setToggleState (blockEditor.isFollowing(), juce::dontSendNotification); };
 
     loadButton.onClick = bigLoadButton.onClick = [this] { chooseReference(); };
     exportButton.onClick = [this] { exportMidi(); };
@@ -73,14 +82,32 @@ VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
     methodLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb8bcc6));
     addAndMakeVisible (methodLabel);
 
-    setupSlider (gateMcLeod, gateMcLeodLabel, "Voicing gate, McLeod (higher is stricter)", *this);
-    setupSlider (gateYin, gateYinLabel, "Voicing gate, YIN (lower is stricter)", *this);
-    setupSlider (latency, latencyLabel, "Live trace latency compensation (ms)", *this);
+    setupSlider (gateMcLeod, gateMcLeodLabel, "Voicing gate, McLeod (higher = stricter)", *this);
+    setupSlider (gateYin, gateYinLabel, "Voicing gate, YIN (lower = stricter)", *this);
+    setupSlider (latency, latencyLabel, "Trace timing, ms (+ later, - earlier)", *this);
+    setupSlider (octave, octaveLabel, "Reference octave shift", *this);
+    setupSlider (offset, offsetLabel, "Reference starts at (s)", *this);
+    setupSlider (greenCents, greenLabel, "Green within (cents)", *this);
+    setupSlider (amberCents, amberLabel, "Amber within (cents)", *this);
+    setupSlider (a4, a4Label, "A4 (Hz)", *this);
+    octave.setNumDecimalPlacesToDisplay (0);
+    keyBox.addItemList ({ "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 1);
+    scaleBox.addItemList ({ "Off", "Major", "Minor" }, 1);
+    keyAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "key", keyBox);
+    scaleAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "scale", scaleBox);
+    for (auto* cb : { &keyBox, &scaleBox }) addAndMakeVisible (*cb);
+    for (auto* l : { &keyLabel, &scaleLabel })
+    {
+        l->setColour (juce::Label::textColourId, juce::Colour (0xffb8bcc6));
+        addAndMakeVisible (*l);
+    }
+    keyLabel.setText ("Key", juce::dontSendNotification);
+    scaleLabel.setText ("Scale (shades the rows)", juce::dontSendNotification);
 
     proc.reference.addChangeListener (this);
-    setSize (980, 720);
+    setSize (1100, 830);
     updateButtons();
-    startTimerHz (30);
+    startTimerHz (60);
 }
 
 VocalAssistorEditor::~VocalAssistorEditor() { proc.reference.removeChangeListener (this); }
@@ -107,30 +134,42 @@ void VocalAssistorEditor::resized()
         b->setBounds (edit.removeFromLeft (b == &splitButton ? 130 : 90));
         edit.removeFromLeft (6);
     }
+    followButton.setBounds (edit.removeFromRight (150));
 
     r.removeFromTop (6);
     statusArea = r.removeFromTop (22);
     progressBar.setBounds (statusArea.withTrimmedRight (90));
     cancelButton.setBounds (statusArea.removeFromRight (80));
 
-    auto bottom = r.removeFromBottom (150);
+    auto bottom = r.removeFromBottom (200);
     r.removeFromBottom (8);
     blockEditor.setBounds (r);
     promptArea = r;
     bigLoadButton.setBounds (promptArea.withSizeKeepingCentre (280, 44).translated (0, 40));
 
-    readoutArea = bottom.removeFromLeft (340);
+    bigArea = bottom.removeFromLeft (360);
+    readoutArea = bigArea;
     bottom.removeFromLeft (14);
-    auto row = [&bottom] (juce::Component& label, juce::Component& control)
+    auto colA = bottom.removeFromLeft (bottom.getWidth() / 2 - 7);
+    bottom.removeFromLeft (14);
+    auto colB = bottom;
+    auto row = [] (juce::Rectangle<int>& col, juce::Component& label, juce::Component& control)
     {
-        auto line = bottom.removeFromTop (30);
-        label.setBounds (line.removeFromLeft (250));
+        auto line = col.removeFromTop (30);
+        label.setBounds (line.removeFromLeft (190));
         control.setBounds (line);
     };
-    row (methodLabel, methodBox);
-    row (gateMcLeodLabel, gateMcLeod);
-    row (gateYinLabel, gateYin);
-    row (latencyLabel, latency);
+    row (colA, keyLabel, keyBox);
+    row (colA, scaleLabel, scaleBox);
+    row (colA, octaveLabel, octave);
+    row (colA, offsetLabel, offset);
+    row (colA, latencyLabel, latency);
+    row (colB, greenLabel, greenCents);
+    row (colB, amberLabel, amberCents);
+    row (colB, a4Label, a4);
+    row (colB, methodLabel, methodBox);
+    row (colB, gateMcLeodLabel, gateMcLeod);
+    row (colB, gateYinLabel, gateYin);
 }
 
 void VocalAssistorEditor::showMessage (const juce::String& title, const juce::String& text)
@@ -276,17 +315,9 @@ void VocalAssistorEditor::timerCallback()
     if (proc.peekAnalysisError().isNotEmpty())
         changeListenerCallback (nullptr);
 
-    va::PitchPoint pts[256];
-    int n;
-    bool changed = false;
-    while ((n = proc.engine.popPoints (pts, 256)) > 0)
-    {
-        latest = pts[n - 1];
-        haveLatest = true;
-        changed = true;
-    }
-    if (changed)
-        repaint (readoutArea);
+    haveLatest = proc.getLatestPoint (latest);
+    blockEditor.tick();
+    repaint (bigArea);
 }
 
 void VocalAssistorEditor::paint (juce::Graphics& g)
@@ -298,7 +329,7 @@ void VocalAssistorEditor::paint (juce::Graphics& g)
     g.drawText ("Vocal Assistor", 20, 12, 220, 30, juce::Justification::centredLeft);
     g.setColour (juce::Colour (0xff7fb2ff));
     g.setFont (juce::FontOptions (14.0f));
-    g.drawText (juce::String ("Version ") + VA_VERSION_LABEL + "   (Phase 3: reference and note blocks)",
+    g.drawText (juce::String ("Version ") + VA_VERSION_LABEL + "   (Phase 4/5: live match against the reference)",
                 240, 12, 600, 30, juce::Justification::centredLeft);
 
     // Quality indicator.
@@ -353,34 +384,56 @@ void VocalAssistorEditor::paint (juce::Graphics& g)
                           area.withSizeKeepingCentre (620, 70).translated (0, -34), juce::Justification::centred, 3);
     }
 
-    // Live pitch readout.
+    // Big readout: ON only while the singer is inside the green threshold.
     g.setColour (juce::Colour (0xff1f232b));
-    g.fillRoundedRectangle (readoutArea.toFloat(), 8.0f);
-    auto box = readoutArea.reduced (14, 10);
-    const double sr = proc.engine.getSampleRate();
-    if (haveLatest && latest.voiced)
+    g.fillRoundedRectangle (bigArea.toFloat(), 8.0f);
     {
-        int cents = 0;
-        const auto name = noteName (latest.hz, 440.0, cents);
-        g.setColour (juce::Colours::white);
-        g.setFont (juce::FontOptions (34.0f, juce::Font::bold));
-        g.drawText (name + "   " + (cents >= 0 ? "+" : "") + juce::String (cents) + " cents", box.removeFromTop (44), juce::Justification::centredLeft);
-        g.setColour (juce::Colour (0xffb8bcc6));
-        g.setFont (juce::FontOptions (14.0f));
-        g.drawText (juce::String (latest.hz, 2) + " Hz   confidence " + juce::String (latest.confidence, 2), box.removeFromTop (22), juce::Justification::centredLeft);
-    }
-    else
-    {
-        g.setColour (juce::Colour (0xff8a8f99));
-        g.setFont (juce::FontOptions (26.0f));
-        g.drawText (haveLatest ? "no pitch" : "waiting for audio", box.removeFromTop (44), juce::Justification::centredLeft);
-        g.setFont (juce::FontOptions (14.0f));
-        g.drawText ("Sing or play audio through this insert.", box.removeFromTop (22), juce::Justification::centredLeft);
-    }
-    g.setColour (juce::Colour (0xff8a8f99));
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String ("Analysis delay ") + juce::String (va::PitchEngine::algorithmicDelayMs (sr), 1)
-                    + " ms.  Dropped samples: " + juce::String (proc.engine.getDroppedSamples()),
-                box, juce::Justification::bottomLeft);
-}
+        auto box = bigArea.reduced (14, 8);
+        const auto& m = proc.matcher();
+        const auto& live = m.live();
+        const bool active = proc.isPlaying() && live.hasBlock;
 
+        juce::String big = "--", hint = proc.isPlaying() ? "no reference block here" : "press play";
+        juce::Colour colour (0xff6c727f);
+        if (active)
+        {
+            const bool on = live.instant == va::BlockState::Green;
+            big = on ? "ON" : "OFF";
+            colour = on ? juce::Colour (0xff4caf50) : (live.instant == va::BlockState::Amber ? juce::Colour (0xffffb300) : juce::Colour (0xfff44336));
+            if (! live.voiced)
+                hint = "no pitch detected";
+            else
+            {
+                const int c = (int) std::lround (std::abs (live.cents));
+                hint = on ? juce::String (c) + " cents " + (live.cents < 0 ? "flat, in tune" : "sharp, in tune")
+                          : juce::String (c) + " cents " + (live.cents < 0 ? "LOW - sing higher" : "HIGH - sing lower");
+            }
+        }
+        g.setColour (colour);
+        g.setFont (juce::FontOptions (72.0f, juce::Font::bold));
+        g.drawText (big, box.removeFromTop (84), juce::Justification::centred);
+        g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        g.drawText (hint, box.removeFromTop (28), juce::Justification::centred);
+
+        g.setColour (juce::Colour (0xffd5d8df));
+        g.setFont (juce::FontOptions (18.0f));
+        g.drawText (m.hasAccuracy() ? "Accuracy " + juce::String (m.accuracyPercent()) + "%" : juce::String ("Accuracy --"),
+                    box.removeFromTop (28), juce::Justification::centred);
+
+        g.setColour (juce::Colour (0xff8a8f99));
+        g.setFont (juce::FontOptions (12.0f));
+        juce::String line = "Waiting for audio";
+        if (haveLatest && latest.voiced)
+        {
+            int cents = 0;
+            const auto name = noteName (latest.hz, proc.viewSettings().a4, cents);
+            line = "Singing " + name + (cents >= 0 ? " +" : " ") + juce::String (cents) + " cents  (" + juce::String (latest.hz, 1) + " Hz)";
+        }
+        else if (haveLatest)
+            line = "Singing: no pitch";
+        g.drawText (line, box.removeFromTop (18), juce::Justification::centred);
+        g.drawText (juce::String ("Delay ") + juce::String (va::PitchEngine::algorithmicDelayMs (proc.engine.getSampleRate()), 1)
+                        + " ms, dropped " + juce::String (proc.engine.getDroppedSamples()),
+                    box, juce::Justification::centred);
+    }
+}

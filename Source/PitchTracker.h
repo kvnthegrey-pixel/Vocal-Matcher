@@ -19,6 +19,10 @@ struct PitchPoint
     float   rawHz        = 0.0f;   // before the median filter; 0 when unvoiced
     float   confidence   = 0.0f;   // McLeod: NSDF peak height. YIN: CMND value.
     bool    voiced       = false;
+    // Host timeline, filled in by PitchEngine (not by the tracker).
+    int64_t hostSample   = 0;       // host timeline position of the window centre
+    bool    hostValid    = false;   // false while the transport is stopped
+    int     passId       = 0;       // changes at every play / loop / locate
 };
 
 inline double hzToCents (double hz, double referenceHz) { return 1200.0 * std::log2 (hz / referenceHz); }

@@ -4,6 +4,7 @@
 #include "PitchEngine.h"
 #include "ReferenceModel.h"
 #include "ReferenceJob.h"
+#include "PerformanceSource.h"
 
 /**
     Vocal Assistor, Phase 3: pass-through, pitch analysis and the reference blocks.
@@ -14,11 +15,13 @@
     Pitch analysis only reads the buffer, on a separate thread.
 */
 class VocalAssistorProcessor final : public juce::AudioProcessor,
-                                     private juce::Timer
+                                     public va::PerformanceSource,
+                                     private juce::Timer,
+                                     private juce::ChangeListener
 {
 public:
     VocalAssistorProcessor();
-    ~VocalAssistorProcessor() override { stopTimer(); job.cancel(); }
+    ~VocalAssistorProcessor() override { stopTimer(); reference.removeChangeListener (this); job.cancel(); }
 
     const juce::String getName() const override { return JucePlugin_Name; }
 
@@ -65,11 +68,46 @@ public:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
+    // ---- va::PerformanceSource ----------------------------------------------
+    double playheadSeconds() const override;
+    bool   isPlaying() const override                 { return hostPlaying.load(); }
+    const va::Matcher& matcher() const override       { return matcherObj; }
+    const va::TraceStore& trace() const override      { return traceStore; }
+    va::ViewSettings viewSettings() const override;
+    /** Most recent analysis frame, for the small live readout (message thread). */
+    bool getLatestPoint (va::PitchPoint& p) const { p = latestPoint; return haveLatestPoint; }
+    /** Runs one timer tick's work now (tests). */
+    void pumpPerformance()                            { updatePerformance(); }
+
     juce::AudioProcessorValueTreeState apvts;
     va::PitchEngine engine;
 
 private:
     void timerCallback() override;
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void updatePerformance();
+    va::MatchSettings currentMatchSettings() const;
+
+    va::Matcher matcherObj;
+    va::TraceStore traceStore;
+    va::PitchPoint latestPoint;
+    bool haveLatestPoint = false;
+    int lastPassId = -1;
+    bool lastPointWasPlaying = false;
+
+    std::atomic<int64_t> hostSampleAtBlock { 0 };
+    std::atomic<double> hostWallMs { 0.0 };
+    std::atomic<bool> hostPlaying { false };
+    std::atomic<double> currentSampleRate { 48000.0 };
+
+    std::atomic<float>* keyParam = nullptr;
+    std::atomic<float>* scaleParam = nullptr;
+    std::atomic<float>* octaveParam = nullptr;
+    std::atomic<float>* offsetParam = nullptr;
+    std::atomic<float>* greenParam = nullptr;
+    std::atomic<float>* amberParam = nullptr;
+    std::atomic<float>* a4Param = nullptr;
+    std::atomic<float>* latencyParam = nullptr;
 
     va::ReferenceJob job;
     juce::String analysisError;

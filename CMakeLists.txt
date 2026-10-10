@@ -32,7 +32,8 @@ set(VA_CORE_SOURCES
     Source/PyinAnalyser.cpp
     Source/MidiReference.cpp
     Source/ReferenceModel.cpp
-    Source/ReferenceJob.cpp)
+    Source/ReferenceJob.cpp
+    Source/Matcher.cpp)
 
 # ---------------------------------------------------------------------------
 # The plugin
@@ -65,6 +66,7 @@ target_sources(VocalAssistor PRIVATE
     Source/MidiReference.h
     Source/ReferenceModel.h
     Source/ReferenceJob.h
+    Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h
     Source/BlockEditor.h
     Source/BlockEditor.cpp
     ${VA_CORE_SOURCES})
