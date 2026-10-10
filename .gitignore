@@ -1,0 +1,10 @@
+build/
+out/
+dist/
+cmake-build-*/
+.vs/
+.vscode/
+*.user
+*.suo
+*.log
+spike-output.txt

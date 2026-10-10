@@ -1,0 +1,75 @@
+VOCAL ASSISTOR - INSTALL GUIDE
+==============================
+
+Vocal Assistor is a 64-bit VST3 plugin for Windows and Cubase Pro 12.
+It is for personal use. The files are not code-signed, so Windows will show
+warnings the first time. The steps below get past them.
+
+WHAT YOU DOWNLOAD
+-----------------
+From the GitHub Release page you get:
+
+  VocalAssistor-<version>-win64-setup.exe    the installer (recommended)
+  VocalAssistor-<version>-win64-vst3.zip     the plugin folder, for manual install
+
+OPTION A: INSTALLER (RECOMMENDED)
+---------------------------------
+1. Download the setup .exe from the Release page.
+2. Double-click it.
+3. If Windows shows "Windows protected your PC" (SmartScreen):
+     a. Click "More info".
+     b. Click "Run anyway".
+4. If Windows asks "Do you want to allow this app to make changes?" click Yes.
+   The installer needs this to write to the system VST3 folder.
+5. Click through the installer. It installs to:
+     C:\Program Files\Common Files\VST3\Vocal Assistor.vst3
+
+OPTION B: MANUAL INSTALL FROM THE ZIP
+-------------------------------------
+1. Download the .zip from the Release page.
+2. Before you unzip it, right-click the .zip, choose Properties, tick
+   "Unblock" at the bottom of the General tab, then click OK. This stops
+   Windows from flagging the files inside.
+3. Unzip it. You get a folder called "Vocal Assistor.vst3".
+4. Copy that whole folder into:
+     C:\Program Files\Common Files\VST3\
+   Windows will ask for administrator permission. Click Continue.
+
+If your browser blocks the download ("not commonly downloaded"), open the
+browser's downloads list, click the three dots next to the file, and choose
+Keep.
+
+MAKE CUBASE FIND THE PLUGIN
+---------------------------
+1. Close Cubase if it is open, then start it again. Cubase scans for new
+   VST3 plugins when it starts.
+2. If the plugin does not appear, open Studio > VST Plug-in Manager.
+3. Check that C:\Program Files\Common Files\VST3 is in the search paths.
+4. Click the Update (circular arrow) button to rescan.
+5. If Vocal Assistor shows as blocked, use "Reset Blocklist", then update
+   again.
+
+Menu and button names can differ a little between Cubase 12 updates. The idea
+is always the same: make Cubase rescan its VST3 folder.
+
+USE IT
+------
+1. Create or select your vocal audio track.
+2. Open the Inspector or the MixConsole and click an empty Insert slot.
+3. Choose Vocal Assistor from the list (it is under Fx > Analyzer).
+4. Open its window with the "e" (edit) button next to the insert.
+
+In this early version the window only shows the version number. Your audio
+passes through unchanged. More features arrive with each release.
+
+UNINSTALL
+---------
+Installer: Windows Settings > Apps > Vocal Assistor > Uninstall.
+Manual: delete C:\Program Files\Common Files\VST3\Vocal Assistor.vst3
+
+IF SOMETHING GOES WRONG
+-----------------------
+Send the following back:
+  - the version shown in the plugin window,
+  - what you did just before the problem,
+  - what Cubase showed (a screenshot helps).

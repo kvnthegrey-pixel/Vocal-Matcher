@@ -1,0 +1,35 @@
+THIRD-PARTY CODE
+================
+
+This repository includes the following third-party code, copied in unchanged
+at the commit shown. Phase 2 modifies the pitch_detector copy; any change is
+listed at the bottom of this file.
+
+1. pitch_detector (JUCE module)
+   Source:  https://github.com/adamski/pitch_detector
+   Commit:  d3b60970e1096889f7b2727f62179ccb3f832640 (7 April 2022)
+   Licence: the module header declares MIT. The repository has no LICENSE file.
+   Note:    PitchYIN is described by its author as based on the YIN code in the
+            aubio library, which is GPL-3.0. Because this plugin is built for
+            personal use only and is not distributed beyond the owner's own
+            GitHub releases, that is acceptable. It would need review before
+            any wider distribution.
+
+2. audio_fft (JUCE module wrapper)
+   Source:  https://github.com/adamski/audio_fft
+   Commit:  922b30a8518c737ffad6ed4c7337704770e8c82c (26 January 2023)
+
+3. AudioFFT
+   Source:  https://github.com/HiFi-LoFi/AudioFFT
+   Commit:  0893b532dd357c7270609425f5ae9d9b5ae7d725
+   Licence: MIT (copyright 2017 HiFi-LoFi), text at the top of AudioFFT.cpp
+            and AudioFFT.h.
+
+4. JUCE 8.0.15
+   Fetched at configure time by CMake, not copied into this repository.
+   Source:  https://github.com/juce-framework/JUCE
+   Used under the JUCE free tier. Personal, non-commercial use.
+
+CHANGES MADE TO VENDORED CODE
+-----------------------------
+None yet.
