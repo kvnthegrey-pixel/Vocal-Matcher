@@ -48,7 +48,9 @@ target_sources(VocalAssistor PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginProcessor.h
     Source/PluginEditor.cpp
-    Source/PluginEditor.h)
+    Source/PluginEditor.h
+    Source/PitchTracker.h
+    Source/PitchEngine.h)
 
 target_compile_definitions(VocalAssistor PUBLIC
     JUCE_WEB_BROWSER=0
@@ -66,21 +68,21 @@ target_link_libraries(VocalAssistor
         juce::juce_recommended_warning_flags)
 
 # ---------------------------------------------------------------------------
-# Phase 1 spike: proves the vendored pitch library builds under CMake and
-# gives a first accuracy reading on pure sine waves. Not part of the plugin.
+# Unit tests for the pitch tracker (Phase 2). Not part of the plugin.
 # ---------------------------------------------------------------------------
-juce_add_console_app(PitchSpike PRODUCT_NAME "PitchSpike")
+juce_add_console_app(PitchTests PRODUCT_NAME "PitchTests")
 
-target_sources(PitchSpike PRIVATE tests/PitchSpike.cpp)
+target_sources(PitchTests PRIVATE tests/PitchTests.cpp Source/PitchTracker.h Source/PitchEngine.h)
 
-target_compile_definitions(PitchSpike PUBLIC
+target_compile_definitions(PitchTests PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0)
 
-target_link_libraries(PitchSpike
+target_link_libraries(PitchTests
     PRIVATE
         juce::juce_core
         juce::juce_audio_basics
+        juce::juce_audio_processors
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags

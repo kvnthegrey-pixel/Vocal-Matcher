@@ -1,347 +1,176 @@
-
-
-#if JUCE_IOS || JUCE_MAC // TODO: Move this to Projucer project?
-#define AUDIOFFT_APPLE_ACCELERATE 1
-#endif
-
-#define CUTOFF 0.93 //0.97 is default
-#define SMALL_CUTOFF 0.5
-#define LOWER_PITCH_CUTOFF 80 //hz
-
-/**
- * TODO: Provide switch between time-based and FFT based methods
- */
+// PATCHED for Vocal Assistor (Phase 2). See third_party/NOTICE.txt.
+// Original: adamski/pitch_detector PitchMPM (McLeod Pitch Method, FFT based).
+//
+// What changed against the original:
+//  - The original used the raw autocorrelation where McLeod specifies the
+//    normalised square difference function (NSDF). That is the source of the
+//    bias seen at low pitches. The NSDF is now computed properly
+//    (2 * r(tau) / m'(tau)), using the library's own FFT autocorrelation.
+//  - Nothing is allocated after construction. The original built several
+//    std::vectors on every call, which must not happen on an audio thread.
+//  - The peak height of the chosen peak is returned as a clarity value, so a
+//    voicing gate can be built on it.
+//  - The hard-coded cutoffs and the 80 Hz limit are settings.
+//  - Search range is limited to [minHz, maxHz].
 
 class PitchMPM
 {
-
 public:
+    PitchMPM (size_t bufferSizeIn) : PitchMPM (44100, bufferSizeIn) {}
 
-    PitchMPM(size_t bufferSize) : PitchMPM(44100, bufferSize) {}
-
-    PitchMPM(int sampleRate, size_t bufferSize) : bufferSize (bufferSize),
-                                                  sampleRate (sampleRate),
-                                                  fftSize (2 * bufferSize), // Needs to be a power of 2!
-                                                  real (audiofft::AudioFFT::ComplexSize(fftSize)),
-                                                  imag (audiofft::AudioFFT::ComplexSize(fftSize)),
-                                                  output (fftSize)
-
-
+    PitchMPM (int sampleRateIn, size_t bufferSizeIn)
+        : bufferSize (bufferSizeIn),
+          fftSize (2 * bufferSizeIn),
+          sampleRate ((float) sampleRateIn),
+          real (audiofft::AudioFFT::ComplexSize (2 * bufferSizeIn)),
+          imag (audiofft::AudioFFT::ComplexSize (2 * bufferSizeIn)),
+          padded (2 * bufferSizeIn, 0.0f),
+          acf (2 * bufferSizeIn, 0.0f),
+          nsdf (bufferSizeIn, 0.0f)
     {
-        //nsdf.insertMultiple(0, 0.0, bufferSize);
-
+        fft.init (fftSize);
+        peakPositions.reserve (bufferSizeIn);
+        updateTauRange();
     }
-    
-    
-    ~PitchMPM()
+
+    /** Finds the pitch of one window of exactly bufferSize samples.
+        Returns true and fills hz and clarity (0..1, the NSDF peak height) when
+        a peak was found. Does not allocate. */
+    bool analyse (const float* audioBuffer, float& hz, float& clarity) noexcept
     {
-        
-        //nsdf.clear();
-        maxPositions.clear();
-        ampEstimates.clear();
-        periodEstimates.clear();
-        
-    }
-    
-    float getPitch(const float *audioBuffer)
-    {
-        
-        maxPositions.clearQuick();
-        periodEstimates.clearQuick();
-        ampEstimates.clearQuick();
-        
-        //nsdfTimeDomain(audioBuffer);
-        //nsdfFrequencyDomain(audioBuffer);
-        
+        hz = 0.0f;
+        clarity = 0.0f;
         if (audioBuffer == nullptr)
-        {
-            DBG ("audioBuffer NULL");
-            return 0.0f;
-        }
-        //nsdf = Array<float> (nsdfFrequencyDomain(audioBuffer).data());
-        std::vector<float> _nsdf = nsdfFrequencyDomain(audioBuffer);
-        std::vector<int> max_positions = peak_picking(_nsdf);
-        std::vector<std::pair<float, float>> estimates;
+            return false;
 
-        //peakPicking();
-        
-        float highestAmplitude = -FLT_MAX;
-        
-        for (auto tau : max_positions)
+        computeNsdf (audioBuffer);
+
+        // Collect the highest peak of every positive region of the NSDF.
+        peakPositions.clear();
+        const int last = (int) std::min<size_t> ((size_t) (tauMax + 1), bufferSize - 2);
+        int pos = 1;
+        // Skip the lobe around lag 0.
+        while (pos < last && nsdf[(size_t) pos] > 0.0f)
+            ++pos;
+        int curMax = 0;
+        while (pos < last)
         {
-            highestAmplitude = jmax(highestAmplitude, _nsdf[tau]);
-            
-            if (_nsdf[tau] > SMALL_CUTOFF)
+            const float v = nsdf[(size_t) pos];
+            if (v <= 0.0f)
             {
-                auto x = parabolic_interpolation(_nsdf, tau);
-                estimates.push_back(x);
-                highestAmplitude = std::max(highestAmplitude, std::get<1>(x));
+                if (curMax > 0) { peakPositions.push_back (curMax); curMax = 0; }
             }
-        }
-
-        if (estimates.empty()) return -1;
-
-        float actualCutoff = CUTOFF * highestAmplitude;
-        float period = 0;
-
-        for (auto estimate : estimates)
-        {
-            if (std::get<1>(estimate) >= actualCutoff)
+            else if (v > nsdf[(size_t) pos - 1] && v >= nsdf[(size_t) pos + 1])
             {
-                period = std::get<0>(estimate);
-                break;
+                if (curMax == 0 || v > nsdf[(size_t) curMax])
+                    curMax = pos;
             }
+            ++pos;
         }
+        if (curMax > 0)
+            peakPositions.push_back (curMax);
 
-        float pitchEstimate = (sampleRate / period);
-        return (pitchEstimate > LOWER_PITCH_CUTOFF) ? pitchEstimate : -1;
-    }
-    
-    void setSampleRate (int newSampleRate)
-    {
-        sampleRate = newSampleRate;
+        float highest = -1.0f;
+        for (int tau : peakPositions)
+            if (tau >= tauMin)
+                highest = std::max (highest, nsdf[(size_t) tau]);
+
+        if (highest < smallCutoff)
+            return false;
+
+        const float threshold = cutoff * highest;
+        for (int tau : peakPositions)
+        {
+            if (tau < tauMin || nsdf[(size_t) tau] < smallCutoff || nsdf[(size_t) tau] < threshold)
+                continue;
+
+            const float a = nsdf[(size_t) tau - 1], b = nsdf[(size_t) tau], c = nsdf[(size_t) tau + 1];
+            const float den = a + c - 2.0f * b;
+            float x = (float) tau, y = b;
+            if (den != 0.0f)
+            {
+                const float delta = a - c;
+                x += delta / (2.0f * den);
+                y = b - delta * delta / (8.0f * den);
+            }
+            if (x <= 0.0f)
+                return false;
+            hz = sampleRate / x;
+            clarity = std::min (y, 1.0f);
+            return hz >= minHz && hz <= maxHz;
+        }
+        return false;
     }
 
-    void setBufferSize (int newBufferSize)
+    /** Original API: frequency in Hz, or -1 when nothing was found. */
+    float getPitch (const float* audioBuffer) noexcept
     {
-        bufferSize = newBufferSize;
-        input.resize (bufferSize);
-        fftSize = 2 * bufferSize;
-        real.resize (audiofft::AudioFFT::ComplexSize(fftSize));
-        imag.resize (audiofft::AudioFFT::ComplexSize(fftSize));
-        output.resize (fftSize);
+        float hz, clarity;
+        return analyse (audioBuffer, hz, clarity) ? hz : -1.0f;
     }
+
+    void setSampleRate (int newSampleRate) { sampleRate = (float) newSampleRate; updateTauRange(); }
+    void setRange (float newMinHz, float newMaxHz) { minHz = newMinHz; maxHz = newMaxHz; updateTauRange(); }
+    void setCutoff (float c) { cutoff = c; }
+    void setSmallCutoff (float c) { smallCutoff = c; }
 
 private:
+    void updateTauRange() noexcept
+    {
+        // Search up to one octave above maxHz so that a tone just out of range is
+        // found at its true pitch and then discarded, rather than being reported
+        // an octave low.
+        tauMin = std::max (2, (int) std::floor (sampleRate / (2.0f * maxHz)) - 1);
+        tauMax = std::min ((int) bufferSize - 3, (int) std::ceil (sampleRate / minHz) + 1);
+    }
+
+    void computeNsdf (const float* x) noexcept
+    {
+        const size_t n = bufferSize;
+        std::copy (x, x + n, padded.begin());
+        std::fill (padded.begin() + (std::ptrdiff_t) n, padded.end(), 0.0f);
+
+        fft.fft (padded.data(), real.data(), imag.data());
+        for (size_t i = 0; i < real.size(); ++i)
+        {
+            real[i] = real[i] * real[i] + imag[i] * imag[i];
+            imag[i] = 0.0f;
+        }
+        fft.ifft (acf.data(), real.data(), imag.data());
+
+        // Work in double for the running denominator.
+        double sumSq = 0.0;
+        for (size_t i = 0; i < n; ++i)
+            sumSq += (double) x[i] * (double) x[i];
+
+        if (sumSq <= 1.0e-12 || acf[0] <= 0.0f)
+        {
+            std::fill (nsdf.begin(), nsdf.end(), 0.0f);
+            return;
+        }
+
+        // The FFT wrapper's scaling is not relied on: r(0) must equal sumSq.
+        const double scale = sumSq / (double) acf[0];
+        double m = 2.0 * sumSq;
+        nsdf[0] = 1.0f;
+        for (size_t tau = 1; tau < n; ++tau)
+        {
+            m -= (double) x[tau - 1] * x[tau - 1] + (double) x[n - tau] * x[n - tau];
+            nsdf[tau] = (m > 1.0e-12) ? (float) (2.0 * scale * (double) acf[tau] / m) : 0.0f;
+        }
+    }
+
     size_t bufferSize;
+    size_t fftSize;
+    float sampleRate;
 
     audiofft::AudioFFT fft;
-    size_t fftSize;
-    std::vector<float> input;
-    std::vector<float> real;
-    std::vector<float> imag;
-    std::vector<float> output;
+    std::vector<float> real, imag, padded, acf, nsdf;
+    std::vector<int> peakPositions;
 
-    float sampleRate;
-    
-    float turningPointX, turningPointY;
-    //Array<float> nsdf;
-    
-    Array<int> maxPositions;
-    Array<float> periodEstimates;
-    Array<float> ampEstimates;
-    
-    /*
-    void parabolicInterpolation(int tau)
-    {
-        float nsdfa = nsdf.getUnchecked (tau - 1);
-        float nsdfb = nsdf.getUnchecked (tau);
-        float nsdfc = nsdf.getUnchecked (tau + 1);
-        float bValue = tau;
-        float bottom = nsdfc + nsdfa - 2 * nsdfb;
-        if (bottom == 0.0)
-        {
-            turningPointX = bValue;
-            turningPointY = nsdfb;
-        }
-        else
-        {
-            float delta = nsdfa - nsdfc;
-            turningPointX = bValue + delta / (2 * bottom);
-            turningPointY = nsdfb - delta * delta / (8 * bottom);
-        }
-    }
-    
-    void peakPicking()
-    {
-        
-        int pos = 0;
-        int curMaxPos = 0;
-        float* nsdfPtr = nsdf.getRawDataPointer();
-        
-        while (pos < (bufferSize - 1) / 3 && nsdfPtr[pos] > 0) {
-            pos++;
-        }
-        
-        while (pos < bufferSize - 1 && nsdfPtr[pos] <= 0.0) {
-            pos++;
-        }
-
-        if (pos == 0) {
-            pos = 1;
-        }
-        
-        while (pos < bufferSize - 1) {
-            if (nsdfPtr[pos] > nsdfPtr[pos - 1] && nsdfPtr[pos] >= nsdfPtr[pos + 1]) {
-                if (curMaxPos == 0) {
-                    curMaxPos = pos;
-                } else if (nsdfPtr[pos] > nsdfPtr[curMaxPos]) {
-                    curMaxPos = pos;
-                }
-            }
-            pos++;
-            if (pos < bufferSize - 1 && nsdfPtr[pos] <= 0) {
-                if (curMaxPos > 0) {
-                    maxPositions.add (curMaxPos);
-                    curMaxPos = 0;
-                }
-                while (pos < bufferSize - 1 && nsdfPtr[pos] <= 0.0f) {
-                    pos++;
-                }
-            }
-        }
-        if (curMaxPos > 0)
-        {
-            maxPositions.add (curMaxPos);
-        }
-    }
-     */
-
-    inline std::pair<float, float> parabolic_interpolation(std::vector<float> array, float x)
-    {
-        int x_adjusted;
-
-        if (x < 1) {
-            x_adjusted = (array[x] <= array[x+1]) ? x : x+1;
-        } else if (x > signed(array.size())-1) {
-            x_adjusted = (array[x] <= array[x-1]) ? x : x-1;
-        } else {
-            float den = array[x+1] + array[x-1] - 2 * array[x];
-            float delta = array[x-1] - array[x+1];
-            return (!den) ? std::make_pair(x, array[x]) : std::make_pair(x + delta / (2 * den), array[x] - delta*delta/(8*den));
-        }
-        return std::make_pair(x_adjusted, array[x_adjusted]);
-    }
-    
-    static std::vector<int> peak_picking(std::vector<float> nsdf)
-    {
-        std::vector<int> max_positions{};
-        int pos = 0;
-        int curMaxPos = 0;
-        ssize_t size = nsdf.size();
-        
-        while (pos < (size - 1) / 3 && nsdf[pos] > 0) pos++;
-        while (pos < size - 1 && nsdf[pos] <= 0.0) pos++;
-        
-        if (pos == 0) pos = 1;
-        
-        while (pos < size - 1) {
-            if (nsdf[pos] > nsdf[pos - 1] && nsdf[pos] >= nsdf[pos + 1]) {
-                if (curMaxPos == 0) {
-                    curMaxPos = pos;
-                } else if (nsdf[pos] > nsdf[curMaxPos]) {
-                    curMaxPos = pos;
-                }
-            }
-            pos++;
-            if (pos < size - 1 && nsdf[pos] <= 0) {
-                if (curMaxPos > 0) {
-                    max_positions.push_back(curMaxPos);
-                    curMaxPos = 0;
-                }
-                while (pos < size - 1 && nsdf[pos] <= 0.0) {
-                    pos++;
-                }
-            }
-        }
-        if (curMaxPos > 0) {
-            max_positions.push_back(curMaxPos);
-        }
-        return max_positions;
-    }
-    
-    /*
-    void nsdfTimeDomain(const float *audioBuffer)
-    {
-        int tau;
-        for (tau = 0; tau < bufferSize; tau++) {
-            float acf = 0;
-            float divisorM = 0;
-            for (int i = 0; i < bufferSize - tau; i++) {
-                acf += audioBuffer[i] * audioBuffer[i + tau];
-                divisorM += audioBuffer[i] * audioBuffer[i] + audioBuffer[i + tau] * audioBuffer[i + tau];
-            }
-            nsdf.setUnchecked(tau, 2 * acf / divisorM);
-        }
-    }
-    */
-
-    // FFT based methods
-    std::vector<float> nsdfFrequencyDomain (const float *audioBuffer)
-    {
-        //std::vector<std::complex<float>> acf(size2);
-        //std::vector<float> acf_real{};
-    
-        real.resize (fftSize);
-        imag.resize (fftSize);
-
-        if (audioBuffer == nullptr)
-            DBG ("audioBuffer NULL: nsdfFrequencyDomain");
-        
-        std::vector<float> acf (autoCorrelation (audioBuffer));
-
-        /*
-        for (auto it = acf.begin() + size2/2; it != acf.end(); ++it)
-            acf_real.push_back((*it) / acf[size2 / 2]);
-        */
-        
-        /** This code is for interleaved data, above is not
-        for (auto it = acf.begin() + size2/2; it != acf.end(); ++it)
-            acf_real.push_back((*it)/acf[size2/2]);
-            //acf_real.push_back((*it).real()/acf[size2/2].real());
-         ****************************************************/
-
-//        for (int i = size2/2; i < acf.size(); ++i)
-//            nsdf.setUnchecked(i, acf[i] / acf[size2 / 2]);
-        
-
-        //return acf_real;
-        return acf;
-    }
-
-    std::vector<float> autoCorrelation(const float *audioBuffer)
-    {
-        if (audioBuffer == nullptr)
-            DBG ("audioBuffer NULL: autoCorrelation");
-        
-        //AudioSampleBuffer paddedAudioBuffer (audioBuffer, 1, fftSize);
-        std::vector<float> input (audioBuffer, audioBuffer + bufferSize);
-        input.resize(fftSize, 0.0f);
-        
-        if (audioBuffer == nullptr)
-            DBG ("audioBuffer NULL: autoCorrelation post resize");
-        
-        if (input.data() == nullptr)
-            DBG ("input.data() NULL: autoCorrelation post resize");
-
-        fft.init(fftSize);
-        fft.fft(input.data(), real.data(), imag.data());
-        //fft.fft(audioBuffer, real.data(), imag.data());
-
-        // Complex Conjugate
-        for (int i = 0; i < fftSize; ++i)
-        {
-            /**
-             * std::complex method
-             */
-            std::complex<float> complex(real[i], imag[i]);
-            complex = complex * std::conj(complex); // No need to scale as AudioFFT does this already
-            real[i] = complex.real();
-            imag[i] = complex.imag();
-
-            /**
-             * calculate via real[i] * real[i] + imag[i] * imag[i].
-             * And if you really mean complex conjugation, just negate imag[i]
-             */
-
-            //imag[i] *= -1;
-            //real[i] = real[i] * real[i]; // + imag[i] * imag[i];
-        }
-
-        fft.ifft(output.data(), real.data(), imag.data());
-        return output;
-    }
-
-
-
+    float cutoff = 0.93f;       // original CUTOFF
+    float smallCutoff = 0.5f;   // original SMALL_CUTOFF
+    float minHz = 80.0f;        // original LOWER_PITCH_CUTOFF
+    float maxHz = 1200.0f;
+    int tauMin = 2, tauMax = 2;
 };

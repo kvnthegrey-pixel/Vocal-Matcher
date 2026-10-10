@@ -1,6 +1,6 @@
 # Phase 1 report: repository and build
 
-Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet tagged. Cubase scans and lists it; insert and window not yet confirmed.**
+Status: **built on Windows in GitHub Actions (run 38032057781 passed); Cubase scans it, loads it as an insert and opens its window (confirmed with a screenshot). The `v0.1.0-alpha` tag is not published.**
 
 ## Checklist against the strict document
 
@@ -18,9 +18,9 @@ Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet t
 | Semantic versioning, first tag `v0.1.0-alpha` | Tag exists locally. Pushing it was refused (HTTP 403) by the session's policy | needs to be created on GitHub |
 | Pitch library builds under CMake | Done | `PitchSpike` target compiled and ran |
 | Plugin scans in Cubase | Done | You confirmed it listed as Vocal Assistor, vendor Vocal Matcher, category Fx\|Analyzer, VST 3 (installed in the per-user VST3 folder) |
-| Plugin loads as an insert and opens its window | **Open, needs you** | insert it on an audio track and open the window |
+| Plugin loads as an insert and opens its window | Done | Screenshot: window open on "Lead Vocals" insert 1, showing the version label |
 
-## Pitch library spike
+## Pitch library spike (superseded by Phase 2)
 
 Library: `adamski/pitch_detector`, vendored under `third_party/` (see `third_party/NOTICE.txt`).
 Test: one 2048-sample window at 48 kHz per pitch, McLeod method, pure sine at 0.5 amplitude.
@@ -49,7 +49,7 @@ What this means for Phase 2:
 
 ## Gate
 
-Create the `v0.1.0-alpha` tag on GitHub, then you confirm the empty plugin scans and loads in Cubase Pro 12. Phase 2 does not start before that.
+The plugin loaded in Cubase, so Phase 2 was started. The `v0.1.0-alpha` tag was refused when pushed from this session (HTTP 403) and was not worked around. It can be created from the GitHub Releases page; this is the one Phase 1 item still open.
 
 ## Fixes made on the way
 

@@ -20,6 +20,9 @@
 #include <audio_fft/audio_fft.h>
 #include <float.h>
 #include <complex>
+#include <vector>
+#include <algorithm>
+#include <cmath>
 
 namespace adamski {
     

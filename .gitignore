@@ -7,4 +7,4 @@ cmake-build-*/
 *.user
 *.suo
 *.log
-spike-output.txt
+test-output.txt

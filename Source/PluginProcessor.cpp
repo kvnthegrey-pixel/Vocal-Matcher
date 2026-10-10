@@ -4,14 +4,34 @@
 VocalAssistorProcessor::VocalAssistorProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts (*this, nullptr, "VocalAssistorState", createLayout())
 {
+    methodParam     = apvts.getRawParameterValue ("method");
+    mcleodGateParam = apvts.getRawParameterValue ("gateMcLeod");
+    yinGateParam    = apvts.getRawParameterValue ("gateYin");
 }
 
-void VocalAssistorProcessor::prepareToPlay (double, int)
+juce::AudioProcessorValueTreeState::ParameterLayout VocalAssistorProcessor::createLayout()
+{
+    using namespace juce;
+    AudioProcessorValueTreeState::ParameterLayout layout;
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "method", 1 }, "Pitch method",
+                                                       StringArray { "McLeod", "YIN" }, 0));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "gateMcLeod", 1 }, "Voicing gate (McLeod)",
+                                                      NormalisableRange<float> (0.5f, 0.99f, 0.01f), va::PitchTracker::defaultMcLeodGate));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "gateYin", 1 }, "Voicing gate (YIN)",
+                                                      NormalisableRange<float> (0.05f, 0.40f, 0.01f), va::PitchTracker::defaultYinGate));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "latencyMs", 1 }, "Live trace latency compensation",
+                                                      NormalisableRange<float> (-50.0f, 50.0f, 0.5f), 0.0f));
+    return layout;
+}
+
+void VocalAssistorProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // The audio is never delayed, so no latency is reported to the host.
     setLatencySamples (0);
+    engine.start (sampleRate, samplesPerBlock);
 }
 
 bool VocalAssistorProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -26,11 +46,16 @@ bool VocalAssistorProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
     return in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo();
 }
 
-void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&)
+void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // Intentionally empty. The host hands us the same buffer for input and
-    // output, so leaving it untouched is a bit-exact pass-through. Pitch
-    // analysis is added in Phase 2 and only ever reads from this buffer.
+    // The host hands us the same buffer for input and output, and nothing
+    // here writes to it, so the audio is a bit-exact pass-through. The pitch
+    // engine only reads the buffer (and copies it into a FIFO).
+    engine.setMethod (methodParam->load() < 0.5f ? va::PitchTracker::Method::McLeod
+                                                 : va::PitchTracker::Method::Yin);
+    engine.setMcLeodGate (mcleodGateParam->load());
+    engine.setYinGate (yinGateParam->load());
+    engine.pushAudio (buffer);
 }
 
 juce::AudioProcessorEditor* VocalAssistorProcessor::createEditor()
@@ -40,7 +65,7 @@ juce::AudioProcessorEditor* VocalAssistorProcessor::createEditor()
 
 void VocalAssistorProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ValueTree state ("VocalAssistorState");
+    auto state = apvts.copyState();
     state.setProperty ("version", stateVersion, nullptr);
 
     if (auto xml = state.createXml())
@@ -51,8 +76,8 @@ void VocalAssistorProcessor::setStateInformation (const void* data, int sizeInBy
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
-        auto state = juce::ValueTree::fromXml (*xml);
-        juce::ignoreUnused (state); // Settings are restored here from Phase 3 onward.
+        if (xml->hasTagName (apvts.state.getType()))
+            apvts.replaceState (juce::ValueTree::fromXml (*xml));
     }
 }
 

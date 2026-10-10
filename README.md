@@ -8,15 +8,15 @@ Personal use only. No pitch correction, no lyrics, no harmonies, no change to yo
 
 | Phase | State |
 | --- | --- |
-| 1. Repository and build | Windows build passes in CI; awaiting tag and Cubase load test |
-| 2. Pitch engine | Not started |
+| 1. Repository and build | Done. Loads in Cubase Pro 12. Release tag not yet published |
+| 2. Pitch engine | Built, tests pass on Linux; awaiting Windows CI and your listening test |
 | 3. Reference vocal to note blocks | Not started |
 | 4. Matching and colours | Not started |
 | 5. Piano roll display | Not started |
 | 6. Cubase sync and saved state | Not started |
 | 7. User testing | Not started |
 
-See `docs/PHASE1_REPORT.md` for the current checklist and the first pitch-library findings.
+See `docs/PHASE2_REPORT.md` for the current checklist and measurements.
 
 ## Install
 

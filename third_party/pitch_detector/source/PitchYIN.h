@@ -1,211 +1,116 @@
+// PATCHED for Vocal Assistor (Phase 2). See third_party/NOTICE.txt.
+// Original: adamski/pitch_detector PitchYIN (based on aubio's YIN).
+//
+// What changed against the original:
+//  - The uninitialised Logger pointer that was dereferenced in getPitchInHz is gone,
+//    as is the DBG call inside the loop.
+//  - The difference function no longer reads past the end of the window. The
+//    integration length is bufferSize - maxTau.
+//  - Nothing is allocated after construction; AudioSampleBuffer is replaced by
+//    std::vector.
+//  - The search is limited to [minHz, maxHz], so the cost per window is bounded.
+//  - The CMND value at the chosen lag is returned, so a voicing gate can use it.
+//    Lower is more periodic, 0.15 is the usual gate.
+
 class PitchYIN
 {
-
 public:
-
-    PitchYIN (int sampleRate, unsigned int bufferSize) : yin (1, bufferSize), bufferSize (bufferSize), sampleRate(sampleRate), tolerence (0.15),
-    deltaWasNegative (false)
+    PitchYIN (int sampleRateIn, unsigned int bufferSizeIn)
+        : bufferSize (bufferSizeIn), sampleRate ((float) sampleRateIn), cmnd (bufferSizeIn, 1.0f)
     {
-    }
-    
-    PitchYIN (unsigned int bufferSize) : yin (1, bufferSize), bufferSize (bufferSize), sampleRate(44100), tolerence (0.15),
-    deltaWasNegative (false)
-    {
-    }
-    
-    void setSampleRate(unsigned int newSampleRate)
-    {
-        sampleRate = newSampleRate;
-        DBG ("sampleRate: " + String(sampleRate));
+        updateTauRange();
     }
 
-    /** Output the difference function */
-    void difference(AudioSampleBuffer& input) 
+    PitchYIN (unsigned int bufferSizeIn) : PitchYIN (44100, bufferSizeIn) {}
+
+    /** Analyses one window of exactly bufferSize samples. Returns true and fills
+        hz and cmndValue when a lag was found (cmndValue is the CMND at that lag). */
+    bool analyse (const float* x, float& hz, float& cmndValue) noexcept
     {
-        float tmp;
-        float *yinData = yin.getWritePointer(0);
-        const float *inputData = input.getReadPointer(0);
+        hz = 0.0f;
+        cmndValue = 1.0f;
+        if (x == nullptr)
+            return false;
 
-        FloatVectorOperations::fill(yinData, 0.0, yin.getNumSamples());
+        const int w = (int) bufferSize - tauMax - 1;   // integration length
+        if (w <= 0)
+            return false;
 
-        for (int tau = 1; tau < yin.getNumSamples(); tau++) 
+        cmnd[0] = 1.0f;
+        double running = 0.0;
+        for (int tau = 1; tau <= tauMax; ++tau)
         {
-            for (int j = 0; j < yin.getNumSamples(); j++) 
+            double d = 0.0;
+            for (int j = 0; j < w; ++j)
             {
-                tmp = inputData[j] - inputData[j + tau];
-                yinData[tau] += (tmp * tmp);
+                const double diff = (double) x[j] - (double) x[j + tau];
+                d += diff * diff;
+            }
+            running += d;
+            cmnd[(size_t) tau] = running > 1.0e-12 ? (float) (d * tau / running) : 1.0f;
+        }
+
+        // First lag under the threshold, followed down to its local minimum.
+        int best = -1;
+        for (int tau = std::max (tauMin, 2); tau < tauMax; ++tau)
+        {
+            if (cmnd[(size_t) tau] < threshold)
+            {
+                while (tau + 1 < tauMax && cmnd[(size_t) tau + 1] < cmnd[(size_t) tau])
+                    ++tau;
+                best = tau;
+                break;
             }
         }
-    }
-
-    /** cumulative mean normalized difference function */
-    void cumulativeMean ()
-    {
-        float *yinData = yin.getWritePointer(0);
-        float tmp = 0.;
-        yinData[0] = 1.;
-        //AUBIO_DBG("%f\t",yinData[0]);
-        for (int tau = 1; tau < yin.getNumSamples(); tau++)
+        // Otherwise the global minimum, which will normally fail the gate.
+        if (best < 0)
         {
-            tmp += yinData[tau];
-            yinData[tau] *= tau / tmp;
-            //AUBIO_DBG("%f\t",yinData[tau]);
+            float lowest = 2.0f;
+            for (int tau = std::max (tauMin, 2); tau < tauMax; ++tau)
+                if (cmnd[(size_t) tau] < lowest) { lowest = cmnd[(size_t) tau]; best = tau; }
+            if (best < 0)
+                return false;
         }
-        //AUBIO_DBG("\n");
-    }
 
-    int getPitch ()
-    {
-        int tau = 0;
-        float *yinData = yin.getWritePointer(0);
-        do {
-            if (yinData[tau] < 0.1) 
-            {
-                while (yinData[tau + 1] < yinData[tau]) 
-                {
-                    tau++;
-                }
-                return tau;
-            }
-            tau++;
-        } while (tau < yin.getNumSamples());
-        //AUBIO_DBG("No pitch found");
-        return 0;
-        
-    }
-    
-    
-    /** Full YIN algorithm */
-    float calculatePitch (const float* inputData) noexcept
-    {
-        int period;
-        float delta = 0.0, runningSum = 0.0;
-        float *yinData = yin.getWritePointer(0);
-        //deltaWasNegative = false;
-
-        //DBG ("calculatePitch");
-
-        yinData[0] = 1.0;
-        for (int tau = 1; tau < yin.getNumSamples(); tau++)
+        const float a = cmnd[(size_t) best - 1], b = cmnd[(size_t) best], c = cmnd[(size_t) best + 1];
+        const float den = a - 2.0f * b + c;
+        float x0 = (float) best, y = b;
+        if (den != 0.0f)
         {
-            yinData[tau] = 0.0;
-            for (int j = 0; j < yin.getNumSamples(); j++)
-            {
-                delta = inputData[j] - inputData[j + tau];
-                yinData[tau] += (delta * delta);
-                //if (delta < 0) deltaWasNegative = true;
-            }
-            runningSum += yinData[tau];
-            if (runningSum != 0)
-            {
-                yinData[tau] *= tau / runningSum;
-            }
-            else
-            {
-                yinData[tau] = 1.0;
-            }
-            period = tau - 3;
-            if (tau > 4 && (yinData[period] < tolerence) &&
-                    (yinData[period] < yinData[period + 1]))
-            {
-                DBG ("return early");
-                return quadraticPeakPosition (yin.getReadPointer(0), period);
-            }
+            x0 += 0.5f * (a - c) / den;
+            y = b - (a - c) * (a - c) / (8.0f * den);
         }
-        return quadraticPeakPosition (yin.getReadPointer(0), minElement (yin.getReadPointer(0)));
+        if (x0 <= 0.0f)
+            return false;
+        hz = sampleRate / x0;
+        cmndValue = std::max (0.0f, y);
+        return hz >= minHz && hz <= maxHz;
     }
 
-    float getPitchInHz (const float* inputData) noexcept
+    /** Original API: frequency in Hz, or 0 when nothing was found. */
+    float getPitchInHz (const float* x) noexcept
     {
-        float pitch = 0.0;
-        //slideBlock (input);
-        pitch = calculatePitch (inputData);
-        log->writeToLog("pitch: " + String(pitch));
-        
-        if (pitch > 0)
-        {
-            pitch = sampleRate / (pitch + 0.0);
-            log->writeToLog ("pitchInHz: " + String(pitch));
-        }
-        else
-        {
-            pitch = 0.0;
-        }
-        currentPitch = pitch;
-        //if (deltaWasNegative) DBG("delta negative");
-        
-        return pitch;
+        float hz, v;
+        return analyse (x, hz, v) ? hz : 0.0f;
     }
-    
-    void setTolerence(float newTolerence)
-    {
-        tolerence = newTolerence;
-    }
+
+    void setSampleRate (unsigned int s) { sampleRate = (float) s; updateTauRange(); }
+    void setTolerence (float t) { threshold = t; }
+    void setRange (float newMinHz, float newMaxHz) { minHz = newMinHz; maxHz = newMaxHz; updateTauRange(); }
 
 private:
-    AudioSampleBuffer yin; //, buf;
-    //float* yinData;
-    unsigned int bufferSize;
-    float tolerence; //, confidence;
-    unsigned int sampleRate;
-    bool deltaWasNegative;
-    float currentPitch;
-    Logger *log;
-
-//    /** adapter to stack ibuf new samples at the end of buf, and trim `buf` to `bufsize` */
-//    void slideBlock (AudioSampleBuffer& ibuf)
-//    {
-//        float *bufData = buf.getWritePointer(0);
-//        const float *ibufData = ibuf.getReadPointer(0);
-//
-//        unsigned int j = 0, overlapSize = 0;
-//        overlapSize = buf.getNumSamples() - ibuf.getNumSamples();
-//        for (j = 0; j < overlapSize; j++) 
-//        {
-//            bufData[j] = bufData[j + ibuf.getNumSamples()];
-//        }
-//        for (j = 0; j < ibuf.getNumSamples(); j++) 
-//        {
-//            bufData[j + overlapSize] = ibufData[j];
-//        }
-//    }
-
-    // Below functions should go in a seperate utilities class
-
-    float quadraticPeakPosition (const float *data, unsigned int pos) noexcept
+    void updateTauRange() noexcept
     {
-        float s0, s1, s2;
-        unsigned int x0, x2;
-        if (pos == 0 || pos == bufferSize - 1) return pos;
-        x0 = (pos < 1) ? pos : pos - 1;
-        x2 = (pos + 1 < bufferSize) ? pos + 1 : pos;
-        if (x0 == pos) return (data[pos] <= data[x2]) ? pos : x2;
-        if (x2 == pos) return (data[pos] <= data[x0]) ? pos : x0;
-        s0 = data[x0];
-        s1 = data[pos];
-        s2 = data[x2];
-        return pos + 0.5 * (s0 - s2 ) / (s0 - 2.* s1 + s2);
+        // Search one octave above maxHz so an out-of-range tone is discarded
+        // instead of being reported an octave low.
+        tauMin = std::max (2, (int) std::floor (sampleRate / (2.0f * maxHz)) - 1);
+        tauMax = std::min ((int) bufferSize / 2, (int) std::ceil (sampleRate / minHz) + 1);
     }
 
-    unsigned int minElement (const float *data) noexcept
-    {
-    #ifndef JUCE_USE_VDSP_FRAMEWORK
-        unsigned int j, pos = 0;
-        float tmp = data[0];
-        for (j = 0; j < bufferSize; j++)
-        {
-            pos = (tmp < data[j]) ? pos : j;
-            tmp = (tmp < data[j]) ? tmp : data[j];
-        }
-    #else
-        float tmp = 0.0;
-        unsigned int pos = 0;
-        #if !DOUBLE_SAMPLES
-        vDSP_minvi(data, 1, &tmp, (vDSP_Length *)&pos, bufferSize);
-        #else
-        vDSP_minviD(data, 1, &tmp, (vDSP_Length *)&pos, bufferSize);
-        #endif
-    #endif
-        return pos;
-    }    
+    unsigned int bufferSize;
+    float sampleRate;
+    std::vector<float> cmnd;
+    float threshold = 0.15f;
+    float minHz = 80.0f, maxHz = 1200.0f;
+    int tauMin = 2, tauMax = 2;
 };

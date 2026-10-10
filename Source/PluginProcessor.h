@@ -1,13 +1,15 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "PitchEngine.h"
 
 /**
-    Vocal Assistor, Phase 1 skeleton.
+    Vocal Assistor, Phase 2: pass-through plus pitch analysis.
 
     The audio path is an exact pass-through: processBlock never touches the
     samples. Plugin latency is reported as 0 samples because the audio itself
     is never delayed (the pitch window only delays the on-screen trace).
+    Pitch analysis only reads the buffer, on a separate thread.
 */
 class VocalAssistorProcessor final : public juce::AudioProcessor
 {
@@ -18,7 +20,7 @@ public:
     const juce::String getName() const override { return JucePlugin_Name; }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override {}
+    void releaseResources() override { engine.stop(); }
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
@@ -42,8 +44,17 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    static constexpr int stateVersion = 1;
+    static constexpr int stateVersion = 2;
+
+    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+
+    juce::AudioProcessorValueTreeState apvts;
+    va::PitchEngine engine;
 
 private:
+    std::atomic<float>* methodParam = nullptr;
+    std::atomic<float>* mcleodGateParam = nullptr;
+    std::atomic<float>* yinGateParam = nullptr;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalAssistorProcessor)
 };

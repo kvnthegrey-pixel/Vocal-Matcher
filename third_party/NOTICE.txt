@@ -1,9 +1,9 @@
 THIRD-PARTY CODE
 ================
 
-This repository includes the following third-party code, copied in unchanged
-at the commit shown. Phase 2 modifies the pitch_detector copy; any change is
-listed at the bottom of this file.
+This repository includes the following third-party code, copied in at the
+commit shown. Phase 2 modifies the pitch_detector copy; every change is listed
+at the bottom of this file. audio_fft and AudioFFT are unchanged.
 
 1. pitch_detector (JUCE module)
    Source:  https://github.com/adamski/pitch_detector
@@ -32,4 +32,32 @@ listed at the bottom of this file.
 
 CHANGES MADE TO VENDORED CODE
 -----------------------------
-None yet.
+pitch_detector, Phase 2 (files source/PitchMPM.h, source/PitchYIN.h, and four
+#include lines added to pitch_detector.h):
+
+  PitchMPM.h
+   - The original used the raw autocorrelation where the McLeod method needs
+     the normalised square difference function. This is why it was 10.5 cents
+     sharp at 110 Hz. Now computes the NSDF properly (2 r(tau) / m'(tau)),
+     still using the library's FFT autocorrelation (AudioFFT).
+   - All buffers are allocated once in the constructor. The original allocated
+     vectors on every call.
+   - Returns the NSDF peak height as a clarity value (new analyse() method;
+     getPitch() keeps its old signature).
+   - Cutoffs (0.93, 0.5) and the 80 Hz limit are settings, plus an upper limit.
+   - Search range is one octave wider than the allowed range, so a tone just
+     outside the range is discarded rather than reported an octave low.
+   - The peak search starts at lag 1 (it skipped past the first real peak for
+     pitches above about 1 kHz).
+
+  PitchYIN.h
+   - Removed the uninitialised Logger pointer that was dereferenced in
+     getPitchInHz, and the DBG call inside the loop.
+   - The difference function no longer reads past the end of the window.
+   - AudioSampleBuffer replaced by std::vector; nothing allocated after
+     construction.
+   - Search range limited to the allowed pitch range; returns the CMND value
+     at the chosen lag (new analyse() method).
+
+  pitch_detector.h
+   - Added includes for <vector>, <algorithm>, <cmath>.
