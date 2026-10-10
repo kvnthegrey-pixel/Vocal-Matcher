@@ -29,7 +29,9 @@ jobs:
           Write-Host "Version label: $label"
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVA_VERSION_LABEL=${{ steps.ver.outputs.label }}
+        # No -G: CMake picks whichever Visual Studio the runner has installed.
+        # The -D argument is quoted because PowerShell splits it at the dots.
+        run: cmake -S . -B build -A x64 "-DVA_VERSION_LABEL=${{ steps.ver.outputs.label }}"
 
       - name: Build plugin (Release)
         run: cmake --build build --config Release --target VocalAssistor_VST3 --parallel
