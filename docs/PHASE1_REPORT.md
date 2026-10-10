@@ -1,6 +1,6 @@
 # Phase 1 report: repository and build
 
-Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet tagged, not yet loaded in Cubase.**
+Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet tagged. Cubase scans and lists it; insert and window not yet confirmed.**
 
 ## Checklist against the strict document
 
@@ -17,7 +17,8 @@ Status: **built on Windows in GitHub Actions (run 38032057781 passed); not yet t
 | Plain-text install guide with SmartScreen steps and Cubase scan | Done | `docs/INSTALL.txt` |
 | Semantic versioning, first tag `v0.1.0-alpha` | Tag exists locally. Pushing it was refused (HTTP 403) by the session's policy | needs to be created on GitHub |
 | Pitch library builds under CMake | Done | `PitchSpike` target compiled and ran |
-| Plugin scans and loads in Cubase | **Open, needs you** | needs a Windows build from the workflow |
+| Plugin scans in Cubase | Done | You confirmed it listed as Vocal Assistor, vendor Vocal Matcher, category Fx\|Analyzer, VST 3 (installed in the per-user VST3 folder) |
+| Plugin loads as an insert and opens its window | **Open, needs you** | insert it on an audio track and open the window |
 
 ## Pitch library spike
 
