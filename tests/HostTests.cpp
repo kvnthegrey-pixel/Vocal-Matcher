@@ -194,6 +194,23 @@ void liveMatchScenario()
         check (ms < 33.0, "a frame paints in under 33 ms (30 fps)");
     }
     editor.reset();
+    {   // comparison sound goes out through the track, and only while sounding
+        p->requestComparison (440.0, 330.0, 0.4);
+        juce::MidiBuffer midi;
+        float peakDuring = 0.0f;
+        for (int b = 0; b < 110; ++b)     // 1.17 s, longer than the 1.0 s sequence
+        {
+            juce::AudioBuffer<float> buf (2, 512);
+            buf.clear();
+            p->processBlock (buf, midi);
+            peakDuring = std::max (peakDuring, buf.getMagnitude (0, 512));
+        }
+        juce::AudioBuffer<float> after (2, 512);
+        after.clear();
+        p->processBlock (after, midi);
+        check (peakDuring > 0.1f, "comparison tone is audible on the track output");
+        check (after.getMagnitude (0, 512) == 0.0f, "after the tone ends the output is untouched again");
+    }
     p->setPlayHead (nullptr);
     p->releaseResources();
 }

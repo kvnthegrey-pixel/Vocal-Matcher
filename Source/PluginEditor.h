@@ -41,11 +41,11 @@ private:
     double progressValue = 0.0;
     juce::ProgressBar progressBar { progressValue };
 
-    juce::ComboBox methodBox, keyBox, scaleBox;
+    juce::ComboBox methodBox, keyBox, scaleBox, auditionBox;
     juce::Slider gateMcLeod, gateYin, latency, octave, offset, greenCents, amberCents, a4;
     juce::Label methodLabel, gateMcLeodLabel, gateYinLabel, latencyLabel, keyLabel, scaleLabel,
-        octaveLabel, offsetLabel, greenLabel, amberLabel, a4Label;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> methodAttach, keyAttach, scaleAttach;
+        octaveLabel, offsetLabel, auditionLabel, greenLabel, amberLabel, a4Label;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> methodAttach, keyAttach, scaleAttach, auditionAttach;
     juce::AudioProcessorValueTreeState::SliderAttachment mcAttach, yinAttach, latAttach, octAttach, offAttach,
         greenAttach, amberAttach, a4Attach;
 

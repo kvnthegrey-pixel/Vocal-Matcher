@@ -37,6 +37,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalAssistorProcessor::crea
                                                       NormalisableRange<float> (0.05f, 0.40f, 0.01f), va::PitchTracker::defaultYinGate));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "latencyMs", 1 }, "Live trace latency compensation",
                                                       NormalisableRange<float> (-50.0f, 50.0f, 0.5f), 0.0f));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "auditionMode", 1 }, "Comparison sound",
+                                                       StringArray { "This track (Cubase output)", "Windows output" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "key", 1 }, "Key",
                                                        StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale",
@@ -58,6 +60,7 @@ void VocalAssistorProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // The audio is never delayed, so no latency is reported to the host.
     setLatencySamples (0);
     currentSampleRate = sampleRate;
+    toneBuf.assign ((size_t) std::max (samplesPerBlock, 1), 0.0f);
     engine.start (sampleRate, samplesPerBlock);
 }
 
@@ -75,8 +78,8 @@ bool VocalAssistorProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
 
 void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // The host hands us the same buffer for input and output, and nothing
-    // here writes to it, so the audio is a bit-exact pass-through. The pitch
+    // The host hands us the same buffer for input and output. Nothing writes to it
+    // except the comparison sound below, so the audio is a bit-exact pass-through otherwise. The pitch
     // engine only reads the buffer (and copies it into a FIFO).
     engine.setMethod (methodParam->load() < 0.5f ? va::PitchTracker::Method::McLeod
                                                  : va::PitchTracker::Method::Yin);
@@ -98,6 +101,29 @@ void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     hostWallMs = juce::Time::getMillisecondCounterHiRes();
     hostPlaying = playing;
     engine.pushAudio (buffer, hostSample, playing);
+
+    // The comparison sound (reference, gap, you) is added to the output only while it is sounding.
+    const int counter = reqCounter.load();
+    if (counter != seenCounter)
+    {
+        seenCounter = counter;
+        tone.start (reqRef.load(), reqSung.load(), reqLen.load(), currentSampleRate.load());
+    }
+    if (tone.isActive())
+    {
+        const int total = buffer.getNumSamples();
+        const int chunk = (int) toneBuf.size();
+        for (int done = 0; done < total && chunk > 0; done += chunk)
+        {
+            const int n = std::min (chunk, total - done);
+            tone.render (toneBuf.data(), n);
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            {
+                float* d = buffer.getWritePointer (ch) + done;
+                for (int i = 0; i < n; ++i) d[i] += toneBuf[(size_t) i];
+            }
+        }
+    }
 }
 
 juce::String VocalAssistorProcessor::loadReferenceMidi (const juce::File& file, int trackIndex)

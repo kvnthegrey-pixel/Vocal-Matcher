@@ -5,6 +5,7 @@
 #include "ReferenceModel.h"
 #include "ReferenceJob.h"
 #include "PerformanceSource.h"
+#include "ToneSequence.h"
 
 /**
     Vocal Assistor, Phase 3: pass-through, pitch analysis and the reference blocks.
@@ -76,6 +77,13 @@ public:
     va::ViewSettings viewSettings() const override;
     /** Most recent analysis frame, for the small live readout (message thread). */
     bool getLatestPoint (va::PitchPoint& p) const { p = latestPoint; return haveLatestPoint; }
+    /** Asks the audio thread to play reference-then-you through this track's output.
+        Only while a comparison is sounding is anything added to the audio; otherwise the pass-through is exact. */
+    void requestComparison (double refHz, double sungHz, double lengthSec)
+    {
+        reqRef = refHz; reqSung = sungHz; reqLen = lengthSec;
+        reqCounter.fetch_add (1);
+    }
     /** Runs one timer tick's work now (tests). */
     void pumpPerformance()                            { updatePerformance(); }
 
@@ -90,6 +98,11 @@ private:
 
     va::Matcher matcherObj;
     va::TraceStore traceStore;
+    std::atomic<double> reqRef { 0.0 }, reqSung { 0.0 }, reqLen { 0.5 };
+    std::atomic<int> reqCounter { 0 };
+    int seenCounter = 0;
+    va::ToneSequence tone;
+    std::vector<float> toneBuf;
     va::PitchPoint latestPoint;
     bool haveLatestPoint = false;
     int lastPassId = -1;

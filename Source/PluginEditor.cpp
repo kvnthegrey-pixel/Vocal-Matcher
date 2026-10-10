@@ -75,8 +75,13 @@ VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
     blockEditor.onSelectionChanged = [this] { updateButtons(); };
     blockEditor.onCompare = [this] (double refHz, double sungHz, double len, const juce::String& text)
     {
-        auto err = auditioner.play (refHz, sungHz, len);
-        compareText = err.isNotEmpty() ? err : text;
+        juce::String err;
+        const bool viaTrack = proc.apvts.getRawParameterValue ("auditionMode")->load() < 0.5f;
+        if (viaTrack)
+            proc.requestComparison (refHz, sungHz, len);
+        else
+            err = auditioner.play (refHz, sungHz, len);
+        compareText = err.isNotEmpty() ? err : text + (viaTrack ? "   (sounds on this track's output)" : "");
         compareUntilMs = juce::Time::getMillisecondCounter() + 8000;
         repaint (statusArea);
     };
@@ -102,7 +107,12 @@ VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
     scaleBox.addItemList ({ "Off", "Major", "Minor" }, 1);
     keyAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "key", keyBox);
     scaleAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "scale", scaleBox);
-    for (auto* cb : { &keyBox, &scaleBox }) addAndMakeVisible (*cb);
+    auditionBox.addItemList ({ "This track (Cubase output)", "Windows output" }, 1);
+    auditionAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "auditionMode", auditionBox);
+    auditionLabel.setText ("Comparison sound plays through", juce::dontSendNotification);
+    auditionLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb8bcc6));
+    addAndMakeVisible (auditionLabel);
+    for (auto* cb : { &keyBox, &scaleBox, &auditionBox }) addAndMakeVisible (*cb);
     for (auto* l : { &keyLabel, &scaleLabel })
     {
         l->setColour (juce::Label::textColourId, juce::Colour (0xffb8bcc6));
@@ -171,6 +181,7 @@ void VocalAssistorEditor::resized()
     row (colA, octaveLabel, octave);
     row (colA, offsetLabel, offset);
     row (colA, latencyLabel, latency);
+    row (colA, auditionLabel, auditionBox);
     row (colB, greenLabel, greenCents);
     row (colB, amberLabel, amberCents);
     row (colB, a4Label, a4);
@@ -341,7 +352,7 @@ void VocalAssistorEditor::paint (juce::Graphics& g)
     g.drawText ("Vocal Assistor", 20, 12, 220, 30, juce::Justification::centredLeft);
     g.setColour (juce::Colour (0xff7fb2ff));
     g.setFont (juce::FontOptions (14.0f));
-    g.drawText (juce::String ("Version ") + VA_VERSION_LABEL + "   (Phase 4/5: live match against the reference)",
+    g.drawText (juce::String ("Version ") + VA_VERSION_LABEL + "",
                 240, 12, 600, 30, juce::Justification::centredLeft);
 
     // Quality indicator.
