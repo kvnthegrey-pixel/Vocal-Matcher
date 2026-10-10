@@ -26,6 +26,14 @@ FetchContent_MakeAvailable(JUCE)
 juce_add_module(${CMAKE_CURRENT_SOURCE_DIR}/third_party/audio_fft)
 juce_add_module(${CMAKE_CURRENT_SOURCE_DIR}/third_party/pitch_detector)
 
+# Reference analysis code shared by the plugin and the tests (no UI in here).
+set(VA_CORE_SOURCES
+    Source/NoteSegmenter.cpp
+    Source/PyinAnalyser.cpp
+    Source/MidiReference.cpp
+    Source/ReferenceModel.cpp
+    Source/ReferenceJob.cpp)
+
 # ---------------------------------------------------------------------------
 # The plugin
 # ---------------------------------------------------------------------------
@@ -50,7 +58,16 @@ target_sources(VocalAssistor PRIVATE
     Source/PluginEditor.cpp
     Source/PluginEditor.h
     Source/PitchTracker.h
-    Source/PitchEngine.h)
+    Source/PitchEngine.h
+    Source/NoteBlocks.h
+    Source/NoteSegmenter.h
+    Source/PyinAnalyser.h
+    Source/MidiReference.h
+    Source/ReferenceModel.h
+    Source/ReferenceJob.h
+    Source/BlockEditor.h
+    Source/BlockEditor.cpp
+    ${VA_CORE_SOURCES})
 
 target_compile_definitions(VocalAssistor PUBLIC
     JUCE_WEB_BROWSER=0
@@ -83,6 +100,56 @@ target_link_libraries(PitchTests
         juce::juce_core
         juce::juce_audio_basics
         juce::juce_audio_processors
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Unit tests for reference analysis, note blocks, MIDI and saved state (Phase 3).
+# ---------------------------------------------------------------------------
+juce_add_console_app(BlockTests PRODUCT_NAME "BlockTests")
+
+target_sources(BlockTests PRIVATE tests/BlockTests.cpp ${VA_CORE_SOURCES})
+
+target_compile_definitions(BlockTests PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0)
+
+target_link_libraries(BlockTests
+    PRIVATE
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Headless host test (Phase 3): the real processor and editor without Cubase.
+# ---------------------------------------------------------------------------
+juce_add_console_app(HostTests PRODUCT_NAME "HostTests")
+
+target_sources(HostTests PRIVATE
+    tests/HostTests.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/BlockEditor.cpp
+    ${VA_CORE_SOURCES})
+
+target_compile_definitions(HostTests PUBLIC
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JucePlugin_Name="Vocal Assistor"
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+
+target_link_libraries(HostTests
+    PRIVATE
+        juce::juce_audio_utils
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags

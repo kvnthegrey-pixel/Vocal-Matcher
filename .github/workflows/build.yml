@@ -36,14 +36,22 @@ jobs:
       - name: Build plugin (Release)
         run: cmake --build build --config Release --target VocalAssistor_VST3 --parallel
 
-      - name: Build and run pitch tests
-        # Phase 2 gate: a failing test fails the build.
+      - name: Build and run the unit and host tests
+        # Phase gate: a failing test fails the build.
         shell: pwsh
         run: |
-          cmake --build build --config Release --target PitchTests --parallel
-          $exe = Get-ChildItem -Path build -Recurse -Filter PitchTests.exe | Select-Object -First 1
-          & $exe.FullName | Tee-Object -FilePath test-output.txt
-          if ($LASTEXITCODE -ne 0) { throw "Pitch tests failed" }
+          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests') {
+            cmake --build build --config Release --target $t --parallel
+            if ($LASTEXITCODE -ne 0) { throw "$t did not build" }
+          }
+          $failed = @()
+          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests') {
+            $exe = Get-ChildItem -Path build -Recurse -Filter "$t.exe" | Select-Object -First 1
+            "===== $t =====" | Tee-Object -FilePath test-output.txt -Append
+            & $exe.FullName 2>&1 | Tee-Object -FilePath test-output.txt -Append
+            if ($LASTEXITCODE -ne 0) { $failed += $t }
+          }
+          if ($failed.Count -gt 0) { throw "Tests failed: $($failed -join ', ')" }
 
       - name: Locate the built plugin
         id: find

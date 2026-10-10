@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "MidiReference.h"
 
 VocalAssistorProcessor::VocalAssistorProcessor()
     : AudioProcessor (BusesProperties()
@@ -58,6 +59,53 @@ void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     engine.pushAudio (buffer);
 }
 
+juce::String VocalAssistorProcessor::loadReferenceMidi (const juce::File& file, int trackIndex)
+{
+    juce::FileInputStream in (file);
+    juce::MidiFile midi;
+    if (! in.openedOk() || ! midi.readFrom (in))
+        return "That file could not be read as a MIDI file.";
+
+    va::AnalysisInfo info;
+    auto blocks = va::MidiReference::importTrack (midi, trackIndex, info.rules);
+    if (blocks.empty())
+        return "That track has no notes long enough to use (the minimum is 80 ms).";
+
+    info.kind = va::SourceKind::Midi;
+    info.sourceName = file.getFileName();
+    info.midiTrack = trackIndex;
+    info.quality = va::Quality::Green;      // MIDI is exact
+    reference.setReference (std::move (blocks), info);
+    return {};
+}
+
+bool VocalAssistorProcessor::loadReferenceAudio (const juce::File& file)
+{
+    analysisError.clear();
+    const auto info = reference.infoCopy();
+    if (! job.start (file, va::SegmenterRules(), va::PyinSettings()))
+        return false;
+    startTimerHz (10);
+    juce::ignoreUnused (info);
+    return true;
+}
+
+void VocalAssistorProcessor::timerCallback()
+{
+    va::AudioAnalysisResult result;
+    if (job.takeResult (result))
+    {
+        stopTimer();
+        if (result.ok)
+            reference.setReference (std::move (result.blocks), result.info);
+        else if (! result.cancelled)
+            analysisError = result.error.isNotEmpty() ? result.error : juce::String ("The analysis failed.");
+        reference.sendChangeMessage();
+    }
+    else if (! job.isRunning())
+        stopTimer();
+}
+
 juce::AudioProcessorEditor* VocalAssistorProcessor::createEditor()
 {
     return new VocalAssistorEditor (*this);
@@ -67,6 +115,8 @@ void VocalAssistorProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     state.setProperty ("version", stateVersion, nullptr);
+    state.removeChild (state.getChildWithName ("Reference"), nullptr);
+    state.addChild (reference.toValueTree(), -1, nullptr);
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -77,7 +127,16 @@ void VocalAssistorProcessor::setStateInformation (const void* data, int sizeInBy
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
         if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        {
+            auto tree = juce::ValueTree::fromXml (*xml);
+            auto ref = tree.getChildWithName ("Reference");
+            if (ref.isValid())
+            {
+                tree.removeChild (ref, nullptr);
+                reference.fromValueTree (ref);       // exact blocks back, no re-analysis
+            }
+            apvts.replaceState (tree);
+        }
     }
 }
 

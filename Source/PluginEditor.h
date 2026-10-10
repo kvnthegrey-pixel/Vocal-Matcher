@@ -1,23 +1,43 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "BlockEditor.h"
 
-/** Phase 2 window: live pitch readout and the pitch settings. The piano roll
-    arrives in Phase 5. */
+/** Phase 3 window: load a reference vocal, edit its note blocks and lock them,
+    plus the live pitch readout and settings from Phase 2. The scrolling piano
+    roll arrives in Phase 5. */
 class VocalAssistorEditor final : public juce::AudioProcessorEditor,
-                                  private juce::Timer
+                                  private juce::Timer,
+                                  private juce::ChangeListener
 {
 public:
     explicit VocalAssistorEditor (VocalAssistorProcessor&);
-    ~VocalAssistorEditor() override = default;
+    ~VocalAssistorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     void timerCallback() override;
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    void chooseReference();
+    void startLoading (const juce::File&);
+    void importMidi (const juce::File&);
+    void exportMidi();
+    void updateButtons();
+    void showMessage (const juce::String& title, const juce::String& text);
 
     VocalAssistorProcessor& proc;
+
+    va::BlockEditor blockEditor;
+    juce::TextButton loadButton { "Load reference vocal..." }, bigLoadButton { "Load reference vocal..." },
+        exportButton { "Export MIDI..." }, undoButton { "Undo" }, lockButton { "Lock reference" },
+        splitButton { "Split at cursor" }, mergeButton { "Merge" }, deleteButton { "Delete" },
+        downButton { "Pitch -1" }, upButton { "Pitch +1" }, fitButton { "Fit all" },
+        cancelButton { "Cancel" };
+    double progressValue = 0.0;
+    juce::ProgressBar progressBar { progressValue };
 
     juce::ComboBox methodBox;
     juce::Slider gateMcLeod, gateYin, latency;
@@ -25,9 +45,11 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> methodAttach;
     juce::AudioProcessorValueTreeState::SliderAttachment mcAttach, yinAttach, latAttach;
 
+    std::unique_ptr<juce::FileChooser> chooser;
+
     va::PitchPoint latest;
     bool haveLatest = false;
-    juce::Rectangle<int> readoutArea;
+    juce::Rectangle<int> readoutArea, statusArea, qualityArea, promptArea;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalAssistorEditor)
 };

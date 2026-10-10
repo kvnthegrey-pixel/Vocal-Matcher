@@ -61,3 +61,12 @@ pitch_detector, Phase 2 (files source/PitchMPM.h, source/PitchYIN.h, and four
 
   pitch_detector.h
    - Added includes for <vector>, <algorithm>, <cmath>.
+
+Reference analysis (Source/PyinAnalyser.*)
+------------------------------------------
+Written for this project from the published pYIN algorithm (Mauch and Dixon,
+"pYIN: A fundamental frequency estimator using probabilistic threshold
+distributions", ICASSP 2014). No code was copied from any pYIN implementation.
+The librosa library was used only as a comparison during development and is
+not part of this repository. It uses AudioFFT (above) for the difference
+function.
