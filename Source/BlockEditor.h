@@ -2,6 +2,7 @@
 
 #include "ReferenceModel.h"
 #include "PerformanceSource.h"
+#include "SungNotes.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <set>
 
@@ -36,6 +37,8 @@ public:
     /** Called by the editor's frame timer: keeps the view on the playhead when following. */
     void tick();
     std::function<void()> onFollowChanged;
+    /** A note was clicked: play the reference then the sung note. sungHz or refHz is 0 when there is no counterpart. */
+    std::function<void (double refHz, double sungHz, double lengthSec, const juce::String& description)> onCompare;
 
     int  selectedCount() const { return (int) selection.size(); }
     bool hasCursor() const     { return cursorUs >= 0; }
@@ -48,6 +51,7 @@ private:
     float secToX (double sec) const;
     void keepInRange();
     void pruneSelection();
+    void compareAt (int64_t refUs, double projectSec, double midiAtMouse, int hitBlockId);
 
     ReferenceModel& model;
     PerformanceSource& perf;

@@ -73,6 +73,13 @@ VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
     fitButton.onClick    = [this] { blockEditor.fitAll(); };
     cancelButton.onClick = [this] { proc.cancelAnalysis(); };
     blockEditor.onSelectionChanged = [this] { updateButtons(); };
+    blockEditor.onCompare = [this] (double refHz, double sungHz, double len, const juce::String& text)
+    {
+        auto err = auditioner.play (refHz, sungHz, len);
+        compareText = err.isNotEmpty() ? err : text;
+        compareUntilMs = juce::Time::getMillisecondCounter() + 8000;
+        repaint (statusArea);
+    };
 
     // Items must exist before the attachment is made, or nothing is selected.
     methodBox.addItemList ({ "McLeod", "YIN" }, 1);
@@ -316,6 +323,11 @@ void VocalAssistorEditor::timerCallback()
         changeListenerCallback (nullptr);
 
     haveLatest = proc.getLatestPoint (latest);
+    if (compareText.isNotEmpty() && juce::Time::getMillisecondCounter() >= compareUntilMs)
+    {
+        compareText.clear();
+        repaint (statusArea);
+    }
     blockEditor.tick();
     repaint (bigArea);
 }
@@ -357,14 +369,20 @@ void VocalAssistorEditor::paint (juce::Graphics& g)
     // Status line.
     g.setColour (juce::Colour (0xff9aa0ab));
     g.setFont (juce::FontOptions (13.0f));
-    if (proc.isAnalysing())
+    if (compareText.isNotEmpty() && juce::Time::getMillisecondCounter() < compareUntilMs)
+    {
+        g.setColour (juce::Colour (0xff00e5ff));
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawText (compareText, statusArea, juce::Justification::centredLeft);
+    }
+    else if (proc.isAnalysing())
         g.drawText ("Analysing " + proc.getAnalysisFileName() + " (experimental audio analysis)...", statusArea.withTrimmedRight (200), juce::Justification::centredLeft);
     else if (info.kind != va::SourceKind::None)
     {
         const auto list = proc.reference.blocksCopy();
         g.drawText ("Reference: " + info.sourceName + "   " + juce::String ((int) list.blocks().size()) + " blocks   "
                         + (list.isLocked() ? "locked" : "unlocked, editable")
-                        + "   Click a block to select (Shift adds), wheel pans, Ctrl+wheel zooms.",
+                        + "   Click a block or one of your notes (cyan) to hear reference then you.",
                     statusArea, juce::Justification::centredLeft);
     }
 

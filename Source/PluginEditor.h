@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "BlockEditor.h"
+#include "Auditioner.h"
 
 /** Phase 4/5 window: load a reference vocal, edit its note blocks and lock them,
     plus the scrolling piano roll with the live trace, the big ON/OFF readout
@@ -49,6 +50,9 @@ private:
         greenAttach, amberAttach, a4Attach;
 
     std::unique_ptr<juce::FileChooser> chooser;
+    va::Auditioner auditioner;
+    juce::String compareText;
+    juce::uint32 compareUntilMs = 0;
 
     va::PitchPoint latest;
     bool haveLatest = false;

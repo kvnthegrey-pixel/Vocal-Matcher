@@ -3,6 +3,8 @@
 #include "../Source/ReferenceJob.h"
 #include "../Source/MidiReference.h"
 #include "../Source/Matcher.h"
+#include "../Source/SungNotes.h"
+#include "../Source/ToneSequence.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -445,6 +447,32 @@ int main()
         { Matcher m; m.setBlocks ({ blk (1, 1, 2, 60) }); MatchSettings s; s.refOffsetSec = 10.0; m.setSettings (s);
           feed (m, 11.0, 12.0, 60, 0); m.onPlayhead (13.0);
           check (m.stateOf (1) == BlockState::Green, "reference offset 10 s: the block is measured at 11 to 12 s"); }
+    }
+
+    std::printf ("\n== Your notes against the reference ==\n");
+    {
+        TraceStore tr;
+        auto add = [&] (double t0, double t1, double midi) { for (double t = t0; t < t1; t += 0.005) tr.add ({ t, (float) midi, 1.0f, true }); };
+        auto gap = [&] (double t0, double t1) { for (double t = t0; t < t1; t += 0.005) tr.add ({ t, 0.0f, 0.0f, false }); };
+        add (1.0, 1.5, 60.3);  gap (1.5, 1.6);            // note 1, 100 ms of silence
+        add (1.6, 2.0, 62.0);  add (2.0, 2.4, 64.0);      // note 2, then a jump with no gap: note 3
+        gap (2.4, 2.5); add (2.5, 2.53, 67.0);            // a 30 ms blip: dropped
+        auto notes = segmentSung (tr, 0.0, 10.0);
+        check (notes.size() == 3, "three sung notes found (the 30 ms blip is dropped)");
+        check (notes.size() == 3 && std::abs (notes[0].midi - 60.3) < 0.01 && std::abs (notes[0].startSec - 1.0) < 0.01, "note 1 keeps its true pitch (60.3, not snapped) and start");
+        check (notes.size() == 3 && std::abs (notes[1].midi - 62.0) < 0.01 && std::abs (notes[2].midi - 64.0) < 0.01, "a jump of 2 semitones with no gap splits the note");
+        check (segmentSung (tr, 1.7, 1.9).size() == 1, "only the range asked for is segmented");
+
+        ToneSequence seq;
+        seq.start (440.0, 330.0, 0.5, 48000.0);
+        std::vector<float> out ((size_t) seq.totalSamples() + 100, 0.0f);
+        seq.render (out.data(), (int) out.size());
+        auto zc = [&] (int64_t a, int64_t b) { int c = 0; for (int64_t i = a + 1; i < b; ++i) if (out[(size_t) i - 1] < 0 && out[(size_t) i] >= 0) ++c; return c / ((b - a) / 48000.0); };
+        check (std::abs (zc (4800, 19200) - 440.0) < 12.0, "first tone is the reference pitch (440 Hz)");
+        float gapPeak = 0; for (int64_t i = 24500; i < 33000; ++i) gapPeak = std::max (gapPeak, std::abs (out[(size_t) i]));
+        check (gapPeak == 0.0f, "silence between the two tones");
+        check (std::abs (zc (24000 + 9600 + 4800, 24000 + 9600 + 19200) - 330.0) < 12.0, "second tone is your pitch (330 Hz)");
+        check (! seq.isActive(), "sequence ends by itself");
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL BLOCK TESTS PASSED" : "BLOCK TESTS FAILED", failures, failures == 1 ? "" : "s");

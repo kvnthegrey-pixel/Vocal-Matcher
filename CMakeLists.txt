@@ -66,7 +66,7 @@ target_sources(VocalAssistor PRIVATE
     Source/MidiReference.h
     Source/ReferenceModel.h
     Source/ReferenceJob.h
-    Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h
+    Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h Source/SungNotes.h Source/ToneSequence.h Source/Auditioner.h
     Source/BlockEditor.h
     Source/BlockEditor.cpp
     ${VA_CORE_SOURCES})

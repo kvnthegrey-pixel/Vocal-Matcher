@@ -201,12 +201,29 @@ void BlockEditor::paint (juce::Graphics& g)
             const float y = yOf ((double) p.midi) + half;
             if (havePrev && p.timeSec - pt < 0.03)
             {
-                g.setColour (juce::Colours::black.withAlpha (0.45f));
-                g.drawLine (px, py, x, y, 4.0f);
-                g.setColour (juce::Colours::white.withAlpha (0.35f + 0.65f * p.confidence));
-                g.drawLine (px, py, x, y, 2.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.35f));
+                g.drawLine (px, py, x, y, 3.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.2f + 0.5f * p.confidence));
+                g.drawLine (px, py, x, y, 1.5f);
             }
             px = x; py = y; pt = p.timeSec; havePrev = true;
+        }
+    }
+
+    // The notes you sang, cut from the live line, at their true pitch (not snapped), so
+    // sitting above or below a reference block shows high or low at a glance.
+    {
+        const auto sung = segmentSung (perf.trace(), xToSec ((float) labelWidth) - 2.0, xToSec ((float) area.getWidth()) + 0.5);
+        for (auto& n : sung)
+        {
+            const float x0 = secToX (n.startSec), x1 = secToX (n.endSec);
+            const float cy = yOf (n.midi) + rowH * 0.5f;
+            const float hh = std::max (4.0f, rowH * 0.32f);
+            juce::Rectangle<float> r (x0, cy - hh, std::max (3.0f, x1 - x0), hh * 2.0f);
+            g.setColour (juce::Colour (0xff00e5ff).withAlpha (0.35f));
+            g.fillRoundedRectangle (r, 3.0f);
+            g.setColour (juce::Colour (0xffe0fbff));
+            g.drawRoundedRectangle (r, 3.0f, 1.5f);
         }
     }
 
@@ -254,12 +271,24 @@ void BlockEditor::mouseDown (const juce::MouseEvent& e)
     const float rowH = (float) getHeight() / (float) (highMidi - lowMidi + 1);
     const double midiAtMouse = (double) lowMidi + ((double) getHeight() - (double) e.y) / (double) rowH - 1.0;
 
+    // A sung note under the mouse: compare it with the reference.
+    {
+        const double projSec = xToSec ((float) e.x);
+        for (auto& n : segmentSung (perf.trace(), projSec - 6.0, projSec + 6.0))
+            if (projSec >= n.startSec && projSec <= n.endSec && std::abs (n.midi - midiAtMouse) < 0.7)
+            {
+                compareAt (us, projSec, n.midi, -1);
+                return;
+            }
+    }
+
     int hit = -1;
     for (auto& b : snapshot.blocks())
         if (us >= b.startUs && us < b.endUs && std::abs (b.midi() + 12 * vs.octaveShift - midiAtMouse) < 0.75) { hit = b.id; break; }
 
     if (hit >= 0)
     {
+        compareAt (us, xToSec ((float) e.x), midiAtMouse, hit);
         cursorUs = us;
         if (e.mods.isShiftDown())
         {
@@ -310,6 +339,74 @@ void BlockEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     }
     keepInRange();
     repaint();
+}
+
+namespace
+{
+double hzOf (double midi, double a4) { return a4 * std::pow (2.0, (midi - 69.0) / 12.0); }
+juce::String nameOf (double midi)
+{
+    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const int n = (int) std::lround (midi);
+    return juce::String (names[((n % 12) + 12) % 12]) + juce::String (n / 12 - 1);
+}
+}
+
+void BlockEditor::compareAt (int64_t, double projectSec, double midiAtMouse, int hitBlockId)
+{
+    if (! onCompare) return;
+    const auto vs = perf.viewSettings();
+    const double shift = 12.0 * vs.octaveShift;
+
+    // Work out the pair: a clicked block is paired with the sung note that overlaps it most,
+    // a clicked sung note with the block that overlaps it most.
+    const NoteBlock* block = nullptr;
+    const SungNote* note = nullptr;
+    std::vector<SungNote> sung;
+
+    if (hitBlockId >= 0)
+    {
+        block = snapshot.find (hitBlockId);
+        if (block == nullptr) return;
+        const double s = block->startSec() + vs.refOffsetSec, en = block->endSec() + vs.refOffsetSec;
+        sung = segmentSung (perf.trace(), s - 0.5, en + 0.5);
+        double best = 0.0;
+        for (auto& n : sung)
+        {
+            const double ov = std::min (en, n.endSec) - std::max (s, n.startSec);
+            if (ov > best) { best = ov; note = &n; }
+        }
+    }
+    else
+    {
+        sung = segmentSung (perf.trace(), projectSec - 6.0, projectSec + 6.0);
+        for (auto& n : sung)
+            if (projectSec >= n.startSec && projectSec <= n.endSec && std::abs (n.midi - midiAtMouse) < 0.7) { note = &n; break; }
+        if (note == nullptr) return;
+        double best = 0.0;
+        for (auto& b : snapshot.blocks())
+        {
+            const double ov = std::min (b.endSec() + vs.refOffsetSec, note->endSec) - std::max (b.startSec() + vs.refOffsetSec, note->startSec);
+            if (ov > best) { best = ov; block = &b; }
+        }
+    }
+
+    const double refMidi = block != nullptr ? block->midi() + shift : 0.0;
+    const double len = block != nullptr ? std::min (0.9, std::max (0.35, block->durationUs() * 1.0e-6))
+                                        : std::min (0.9, std::max (0.35, note->endSec - note->startSec));
+    juce::String text;
+    if (block != nullptr && note != nullptr)
+    {
+        const int c = (int) std::lround ((note->midi - refMidi) * 100.0);
+        text = "Reference " + nameOf (refMidi) + " then you " + nameOf (note->midi) + ": "
+               + (std::abs (c) < 1 ? juce::String ("spot on") : juce::String (std::abs (c)) + " cents " + (c < 0 ? "LOW" : "HIGH"));
+    }
+    else if (block != nullptr)
+        text = "Reference " + nameOf (refMidi) + " (nothing sung here)";
+    else
+        text = "You sang " + nameOf (note->midi) + " (no reference block under it)";
+
+    onCompare (block != nullptr ? hzOf (refMidi, vs.a4) : 0.0, note != nullptr ? hzOf (note->midi, vs.a4) : 0.0, len, text);
 }
 
 void BlockEditor::splitAtCursor()

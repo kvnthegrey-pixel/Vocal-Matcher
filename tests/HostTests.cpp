@@ -125,6 +125,11 @@ void liveMatchScenario()
     pump (300); p->pumpPerformance();
 
     std::printf ("  info states %d %d %d\n", (int) stateOf (0), (int) stateOf (1), (int) stateOf (2));
+    {
+        auto ed = std::unique_ptr<juce::AudioProcessorEditor> (p->createEditor());
+        pump (150);
+        snapshot (*ed, "6_sung_vs_reference.png");
+    }
     check (stateOf (0) == va::BlockState::Green, "block 1 (exact) is Green");
     check (stateOf (1) == va::BlockState::Amber, "block 2 (60 cents sharp) is Amber");
     check (stateOf (2) == va::BlockState::Red, "block 3 (wrong note) is Red");
