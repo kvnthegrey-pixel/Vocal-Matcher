@@ -191,9 +191,10 @@ inline double eqResponseDb (const std::array<float, (size_t) numEqBands>& gains,
 /** Filter gains whose COMBINED response follows the correction curve. Neighbouring
     filters overlap, so setting each gain to the curve value would overshoot; this
     solves for the gains (ridge-regularised least squares, then two refinements). */
+constexpr size_t N = (size_t) numEqBands;      // namespace scope: MSVC will not use a local constant inside the lambda below
+
 inline std::array<float, (size_t) numEqBands> eqGainsFor (const BandDb& corr, double sr)
 {
-    constexpr size_t N = (size_t) numEqBands;
     std::array<double, N> t {};
     for (size_t j = 0; j < N; ++j) t[j] = curveAt (corr, eqCentres[j]);
 
