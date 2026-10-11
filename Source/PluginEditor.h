@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "BlockEditor.h"
+#include "EqView.h"
 #include "Auditioner.h"
 
 /** Phase 4/5 window: load a reference vocal, edit its note blocks and lock them,
@@ -17,6 +18,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void showToneTab() { showEq = true; tabEq.setToggleState (true, juce::dontSendNotification); applyTab(); }
 
 private:
     void timerCallback() override;
@@ -27,11 +29,15 @@ private:
     void importMidi (const juce::File&);
     void exportMidi();
     void updateButtons();
+    void applyTab();
     void showMessage (const juce::String& title, const juce::String& text);
 
     VocalAssistorProcessor& proc;
 
     va::BlockEditor blockEditor;
+    EqView eqView;
+    juce::TextButton tabPitch { "Pitch" }, tabEq { "Tone EQ" };
+    bool showEq = false;
     juce::ToggleButton followButton { "Follow playhead" };
     juce::TextButton loadButton { "Load reference vocal..." }, bigLoadButton { "Load reference vocal..." },
         exportButton { "Export MIDI..." }, undoButton { "Undo" }, lockButton { "Lock reference" },

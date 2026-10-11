@@ -19,6 +19,8 @@ VocalAssistorProcessor::VocalAssistorProcessor()
     amberParam      = apvts.getRawParameterValue ("amberCents");
     a4Param         = apvts.getRawParameterValue ("a4");
     latencyParam    = apvts.getRawParameterValue ("latencyMs");
+    eqOnParam       = apvts.getRawParameterValue ("eqOn");
+    eqAmountParam   = apvts.getRawParameterValue ("eqAmount");
 
     reference.addChangeListener (this);
     matcherObj.setSettings (currentMatchSettings());
@@ -37,6 +39,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalAssistorProcessor::crea
                                                       NormalisableRange<float> (0.05f, 0.40f, 0.01f), va::PitchTracker::defaultYinGate));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "latencyMs", 1 }, "Live trace latency compensation",
                                                       NormalisableRange<float> (-50.0f, 50.0f, 0.5f), 0.0f));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "eqOn", 1 }, "Tone EQ on", false));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "eqAmount", 1 }, "Tone EQ amount (%)",
+                                                      NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "auditionMode", 1 }, "Comparison sound",
                                                        StringArray { "This track (Cubase output)", "Windows output" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "key", 1 }, "Key",
@@ -61,6 +66,9 @@ void VocalAssistorProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     setLatencySamples (0);
     currentSampleRate = sampleRate;
     toneBuf.assign ((size_t) std::max (samplesPerBlock, 1), 0.0f);
+    learnScratch.assign ((size_t) std::max (samplesPerBlock, 1), 0.0f);
+    eqBank.prepare (sampleRate, std::max (2, getTotalNumInputChannels()));
+    lastEqOn = -1.0f;
     engine.start (sampleRate, samplesPerBlock);
 }
 
@@ -101,6 +109,32 @@ void VocalAssistorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     hostWallMs = juce::Time::getMillisecondCounterHiRes();
     hostPlaying = playing;
     engine.pushAudio (buffer, hostSample, playing);
+
+    // Tone learning listens to the dry input (before any EQ).
+    if (learning.load() && buffer.getNumChannels() > 0)
+    {
+        const int total = buffer.getNumSamples();
+        const int chunk = (int) learnScratch.size();
+        for (int done = 0; done < total && chunk > 0; done += chunk)
+        {
+            const int n = std::min (chunk, total - done);
+            const float k = 1.0f / (float) buffer.getNumChannels();
+            for (int i = 0; i < n; ++i) learnScratch[(size_t) i] = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            {
+                const float* s = buffer.getReadPointer (ch) + done;
+                for (int i = 0; i < n; ++i) learnScratch[(size_t) i] += s[i] * k;
+            }
+            int a, b, c2, d;
+            learnFifo.prepareToWrite (n, a, b, c2, d);
+            std::copy (learnScratch.begin(), learnScratch.begin() + b, learnStore.begin() + a);
+            if (d > 0) std::copy (learnScratch.begin() + b, learnScratch.begin() + b + d, learnStore.begin() + c2);
+            learnFifo.finishedWrite (b + d);
+        }
+    }
+
+    // The tone EQ: exactly nothing happens while it is off and settled.
+    eqBank.process (buffer);
 
     // The comparison sound (reference, gap, you) is added to the output only while it is sounding.
     const int counter = reqCounter.load();
@@ -152,6 +186,7 @@ bool VocalAssistorProcessor::loadReferenceAudio (const juce::File& file)
     const auto info = reference.infoCopy();
     if (! job.start (file, va::SegmenterRules(), va::PyinSettings()))
         return false;
+    loadToneReference (file);          // an audio reference is also the tone target
     juce::ignoreUnused (info);
     return true;
 }
@@ -245,9 +280,108 @@ void VocalAssistorProcessor::updatePerformance()
     matcherObj.onPlayhead (playheadSeconds());
 }
 
+void VocalAssistorProcessor::joinToneThread()
+{
+    toneCancel = true;
+    if (toneThread.joinable()) toneThread.join();
+}
+
+bool VocalAssistorProcessor::loadToneReference (const juce::File& f)
+{
+    if (toneBusy.load()) return false;
+    joinToneThread();
+    toneCancel = false;
+    toneDone = false;
+    toneBusy = true;
+    toneFile = f.getFileName();
+    toneThread = std::thread ([this, f]
+    {
+        va::BandDb out {};
+        juce::String err;
+        const bool ok = va::analyseToneFile (f, out, err, toneCancel);
+        {
+            const std::lock_guard<std::mutex> l (toneMutex);
+            toneResult = out; toneOk = ok; toneErr = err;
+        }
+        toneDone = true;
+    });
+    return true;
+}
+
+void VocalAssistorProcessor::clearMyVoice()
+{
+    learning = false;
+    if (mineSpec) mineSpec->clear();
+    haveMine = false;
+    mineSeconds = 0.0;
+    int s1, n1, s2, n2;
+    learnFifo.prepareToRead (learnFifo.getNumReady(), s1, n1, s2, n2);
+    learnFifo.finishedRead (n1 + n2);
+    applyEqTargets();
+    ++eqRev;
+}
+
+void VocalAssistorProcessor::applyEqTargets()
+{
+    std::array<float, (size_t) va::numEqBands> t {};
+    if (haveRef && haveMine && eqOnParam->load() >= 0.5f)
+    {
+        const float k = eqAmountParam->load() * 0.01f;
+        for (size_t i = 0; i < t.size(); ++i) t[i] = solvedGains[i] * k;
+    }
+    eqBank.setTargets (t);
+    lastEqOn = eqOnParam->load();
+    lastEqAmount = eqAmountParam->load();
+}
+
+void VocalAssistorProcessor::updateEq()
+{
+    bool curveChanged = false;
+
+    if (toneDone.exchange (false))
+    {
+        std::lock_guard<std::mutex> l (toneMutex);
+        toneBusy = false;
+        if (toneOk) { refDb = toneResult; haveRef = true; toneName = toneFile; curveChanged = true; }
+        else if (toneErr != "cancelled") toneErrorMsg = toneErr;
+    }
+
+    const double sr = currentSampleRate.load();
+    if (learning.load() || learnFifo.getNumReady() > 0)
+    {
+        if (! mineSpec || mineSpecRate != sr) { mineSpec = std::make_unique<va::BandSpectrum> (sr, 12000); mineSpecRate = sr; }
+        std::vector<float> tmp;
+        int s1, n1, s2, n2;
+        const int ready = learnFifo.getNumReady();
+        learnFifo.prepareToRead (ready, s1, n1, s2, n2);
+        tmp.assign (learnStore.begin() + s1, learnStore.begin() + s1 + n1);
+        if (n2 > 0) tmp.insert (tmp.end(), learnStore.begin() + s2, learnStore.begin() + s2 + n2);
+        learnFifo.finishedRead (n1 + n2);
+        if (learning.load() && ! tmp.empty())
+        {
+            mineSpec->add (tmp.data(), (int) tmp.size());
+            mineSeconds = mineSpec->seconds();
+            if (++tickCount % 6 == 0 && mineSpec->result (mineDb)) { haveMine = true; curveChanged = true; }
+        }
+    }
+
+    if (curveChanged && haveRef && haveMine)
+    {
+        corrCurve = va::computeCorrection (refDb, mineDb);
+        solvedGains = va::eqGainsFor (corrCurve, sr);
+    }
+    if (curveChanged) ++eqRev;
+    if (curveChanged || eqOnParam->load() != lastEqOn || eqAmountParam->load() != lastEqAmount)
+    {
+        applyEqTargets();
+        ++eqRev;
+    }
+}
+
 void VocalAssistorProcessor::timerCallback()
 {
     updatePerformance();
+    updateEq();
 
     va::AudioAnalysisResult result;
     if (job.takeResult (result))
@@ -271,6 +405,14 @@ void VocalAssistorProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("version", stateVersion, nullptr);
     state.removeChild (state.getChildWithName ("Reference"), nullptr);
     state.addChild (reference.toValueTree(), -1, nullptr);
+    state.removeChild (state.getChildWithName ("Tone"), nullptr);
+    {
+        auto join = [] (const va::BandDb& b) { juce::StringArray s; for (auto v : b) s.add (juce::String (v, 3)); return s.joinIntoString (","); };
+        juce::ValueTree tone ("Tone");
+        if (haveRef) { tone.setProperty ("ref", join (refDb), nullptr); tone.setProperty ("name", toneName, nullptr); }
+        if (haveMine) tone.setProperty ("mine", join (mineDb), nullptr);
+        state.addChild (tone, -1, nullptr);
+    }
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -288,6 +430,27 @@ void VocalAssistorProcessor::setStateInformation (const void* data, int sizeInBy
             {
                 tree.removeChild (ref, nullptr);
                 reference.fromValueTree (ref);       // exact blocks back, no re-analysis
+            }
+            auto tone = tree.getChildWithName ("Tone");
+            if (tone.isValid())
+            {
+                tree.removeChild (tone, nullptr);
+                auto parse = [] (const juce::String& s, va::BandDb& out)
+                {
+                    auto parts = juce::StringArray::fromTokens (s, ",", "");
+                    if (parts.size() != va::numBands) return false;
+                    for (int i = 0; i < va::numBands; ++i) out[(size_t) i] = parts[i].getFloatValue();
+                    return true;
+                };
+                haveRef = parse (tone.getProperty ("ref").toString(), refDb);
+                haveMine = parse (tone.getProperty ("mine").toString(), mineDb);
+                toneName = tone.getProperty ("name").toString();
+                if (haveRef && haveMine)
+                {
+                    corrCurve = va::computeCorrection (refDb, mineDb);
+                    solvedGains = va::eqGainsFor (corrCurve, currentSampleRate.load());
+                }
+                ++eqRev;
             }
             apvts.replaceState (tree);
             matcherObj.setBlocks (reference.blocksCopy().blocks());

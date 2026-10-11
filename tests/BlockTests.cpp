@@ -5,6 +5,7 @@
 #include "../Source/Matcher.h"
 #include "../Source/SungNotes.h"
 #include "../Source/ToneSequence.h"
+#include "../Source/EqMatch.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -473,6 +474,81 @@ int main()
         check (gapPeak == 0.0f, "silence between the two tones");
         check (std::abs (zc (24000 + 9600 + 4800, 24000 + 9600 + 19200) - 330.0) < 12.0, "second tone is your pitch (330 Hz)");
         check (! seq.isActive(), "sequence ends by itself");
+    }
+
+    std::printf ("\n== Tone matching EQ ==\n");
+    {
+        const double sr = 48000.0;
+        std::mt19937 rng (5);
+        std::normal_distribution<float> nd (0.0f, 0.1f);
+        auto noise = [&] (size_t n) { std::vector<float> v (n); for (auto& s : v) s = nd (rng); return v; };
+        auto spectrumOf = [&] (const std::vector<float>& x, BandDb& out)
+        { BandSpectrum s (sr); s.add (x.data(), (int) x.size()); return s.result (out); };
+
+        // a sine lands in its own band
+        {
+            std::vector<float> sine (96000);
+            for (size_t i = 0; i < sine.size(); ++i) sine[i] = 0.3f * std::sin (2.0f * 3.14159265f * 1000.0f * (float) i / 48000.0f);
+            BandDb s; const bool ok = spectrumOf (sine, s);
+            int peak = (int) (std::max_element (s.begin(), s.end()) - s.begin());
+            check (ok && std::abs (bandCentre (peak) - 1000.0) < 80.0, "a 1 kHz tone shows up in the 1 kHz band");
+        }
+        check (! [&] { BandSpectrum s (sr); std::vector<float> q (24000, 0.0f); s.add (q.data(), (int) q.size()); BandDb d; return s.result (d); }(), "silence is not measured");
+
+        auto ref = noise (384000);                         // white: bright
+        auto mine = noise (384000);                        // dark: one-pole low-pass near 2 kHz
+        { float z = 0.0f; const float a = 1.0f - std::exp (-2.0f * 3.14159265f * 2000.0f / 48000.0f); for (auto& s : mine) { z += a * (s - z); s = z * 3.0f; } }
+        BandDb rs, ms;
+        check (spectrumOf (ref, rs) && spectrumOf (mine, ms), "both voices measured");
+        auto corr = computeCorrection (rs, ms);
+        float maxAbs = 0.0f; for (auto v : corr) maxAbs = std::max (maxAbs, std::abs (v));
+        check (maxAbs <= 12.001f, "the correction never goes past +/-12 dB");
+        check (corr[(size_t) 19] > 3.0f && corr[(size_t) 19] > corr[(size_t) 9], "the dark voice is told to boost the highs more than the mids");
+
+        auto errorOf = [&] (const BandDb& a, const BandDb& b)
+        {
+            double meanDiff = 0, e = 0; int n = 0;
+            for (int i = 0; i < numBands; ++i) if (bandCentre (i) >= 100 && bandCentre (i) <= 8000) { meanDiff += a[(size_t) i] - b[(size_t) i]; ++n; }
+            meanDiff /= n;
+            for (int i = 0; i < numBands; ++i) if (bandCentre (i) >= 100 && bandCentre (i) <= 8000) { const double d = a[(size_t) i] - b[(size_t) i] - meanDiff; e += d * d; }
+            return std::sqrt (e / n);
+        };
+        const double before = errorOf (ms, rs);
+
+        EqFilterBank bank;
+        bank.prepare (sr, 1);
+        const auto g = eqGainsFor (corr, sr);
+        {   // the combined response follows the curve at the filter centres
+            double worst = 0.0;
+            for (size_t j = 0; j < (size_t) numEqBands; ++j) worst = std::max (worst, std::abs (eqResponseDb (g, eqCentres[j], sr) - curveAt (corr, eqCentres[j])));
+            std::printf ("       worst fit error %.2f dB\n", worst);
+            check (worst < 1.0, "the 12 filters together follow the correction curve within 1 dB at their centres");
+        }
+        bank.setTargets (g);
+        juce::AudioBuffer<float> z (1, 512); z.clear();
+        for (int i = 0; i < 80; ++i) bank.process (z);       // let the gains settle
+        std::vector<float> fixedMine = mine;
+        bool changed = false;
+        for (size_t i = 0; i + 512 <= fixedMine.size(); i += 512)
+        {
+            juce::AudioBuffer<float> b (1, 512);
+            std::copy (fixedMine.begin() + (std::ptrdiff_t) i, fixedMine.begin() + (std::ptrdiff_t) i + 512, b.getWritePointer (0));
+            changed |= bank.process (b);
+            std::copy (b.getReadPointer (0), b.getReadPointer (0) + 512, fixedMine.begin() + (std::ptrdiff_t) i);
+        }
+        BandDb fs; spectrumOf (fixedMine, fs);
+        const double after = errorOf (fs, rs);
+        for (int i = 0; i < numBands; ++i) std::printf ("       %6.0f Hz  before %6.2f  corr %6.2f  after %6.2f\n", bandCentre (i), ms[(size_t) i] - rs[(size_t) i], corr[(size_t) i], fs[(size_t) i] - rs[(size_t) i]);
+        std::printf ("       tone error before %.2f dB, after %.2f dB\n", before, after);
+        check (changed && after < before * 0.5, "after the EQ the tonal error is less than half what it was");
+        bool finite = true; for (float s : fixedMine) if (! std::isfinite (s)) { finite = false; break; }
+        check (finite, "the EQ output stays finite");
+
+        EqFilterBank off; off.prepare (sr, 1);
+        juce::AudioBuffer<float> keep (1, 512); for (int i = 0; i < 512; ++i) keep.setSample (0, i, nd (rng));
+        juce::AudioBuffer<float> copy; copy.makeCopyOf (keep);
+        const bool did = off.process (keep);
+        check (! did && std::memcmp (keep.getReadPointer (0), copy.getReadPointer (0), 512 * sizeof (float)) == 0, "with every gain at 0 the audio is not touched at all");
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL BLOCK TESTS PASSED" : "BLOCK TESTS FAILED", failures, failures == 1 ? "" : "s");

@@ -41,7 +41,7 @@ juce::Colour qualityColour (va::Quality q)
 }
 
 VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), blockEditor (p.reference, p),
+    : AudioProcessorEditor (&p), proc (p), blockEditor (p.reference, p), eqView (p),
       mcAttach (p.apvts, "gateMcLeod", gateMcLeod),
       yinAttach (p.apvts, "gateYin", gateYin),
       latAttach (p.apvts, "latencyMs", latency),
@@ -56,6 +56,17 @@ VocalAssistorEditor::VocalAssistorEditor (VocalAssistorProcessor& p)
                      &deleteButton, &downButton, &upButton, &fitButton, &cancelButton })
         addAndMakeVisible (*b);
     addChildComponent (progressBar);
+    addChildComponent (eqView);
+    eqView.onMessage = [this] (const juce::String& t, const juce::String& m) { showMessage (t, m); };
+    for (auto* b : { &tabPitch, &tabEq })
+    {
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (77);
+        addAndMakeVisible (*b);
+    }
+    tabPitch.setToggleState (true, juce::dontSendNotification);
+    tabPitch.onClick = [this] { showEq = false; applyTab(); };
+    tabEq.onClick    = [this] { showEq = true;  applyTab(); };
     addAndMakeVisible (followButton);
     followButton.setToggleState (true, juce::dontSendNotification);
     followButton.onClick = [this] { blockEditor.setFollow (followButton.getToggleState()); };
@@ -141,6 +152,9 @@ void VocalAssistorEditor::resized()
     bar.removeFromLeft (6);
     undoButton.setBounds (bar.removeFromLeft (70));
     bar.removeFromLeft (6);
+    tabEq.setBounds (bar.removeFromRight (100));
+    bar.removeFromRight (6);
+    tabPitch.setBounds (bar.removeFromRight (80));
     lockButton.setBounds (bar.removeFromLeft (130));
     qualityArea = bar.reduced (10, 0);
 
@@ -161,6 +175,7 @@ void VocalAssistorEditor::resized()
     auto bottom = r.removeFromBottom (200);
     r.removeFromBottom (8);
     blockEditor.setBounds (r);
+    eqView.setBounds (r);
     promptArea = r;
     bigLoadButton.setBounds (promptArea.withSizeKeepingCentre (280, 44).translated (0, 40));
 
@@ -299,8 +314,8 @@ void VocalAssistorEditor::updateButtons()
     const int sel = blockEditor.selectedCount();
 
     loadButton.setEnabled (! busy);
-    bigLoadButton.setVisible (! has && ! busy);
-    blockEditor.setVisible (has || busy);
+    bigLoadButton.setVisible (! has && ! busy && ! showEq);
+    blockEditor.setVisible ((has || busy) && ! showEq);
     repaint();
     exportButton.setEnabled (has);
     undoButton.setEnabled (proc.reference.canUndo() && ! locked);
@@ -314,6 +329,16 @@ void VocalAssistorEditor::updateButtons()
     fitButton.setEnabled (has);
     cancelButton.setVisible (busy);
     progressBar.setVisible (busy);
+}
+
+void VocalAssistorEditor::applyTab()
+{
+    eqView.setVisible (showEq);
+    for (auto* b : { &splitButton, &mergeButton, &deleteButton, &downButton, &upButton, &fitButton })
+        b->setVisible (! showEq);
+    followButton.setVisible (! showEq);
+    updateButtons();
+    repaint();
 }
 
 void VocalAssistorEditor::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -398,7 +423,7 @@ void VocalAssistorEditor::paint (juce::Graphics& g)
     }
 
     // First-open prompt, shown in place of the block view while there is no reference.
-    if (! proc.reference.hasBlocks() && ! proc.isAnalysing())
+    if (! proc.reference.hasBlocks() && ! proc.isAnalysing() && ! showEq)
     {
         auto area = promptArea;
         g.setColour (juce::Colour (0xff101216));

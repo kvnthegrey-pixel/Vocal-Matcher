@@ -33,7 +33,8 @@ set(VA_CORE_SOURCES
     Source/MidiReference.cpp
     Source/ReferenceModel.cpp
     Source/ReferenceJob.cpp
-    Source/Matcher.cpp)
+    Source/Matcher.cpp
+    Source/EqMatch.cpp)
 
 # ---------------------------------------------------------------------------
 # The plugin
@@ -66,9 +67,11 @@ target_sources(VocalAssistor PRIVATE
     Source/MidiReference.h
     Source/ReferenceModel.h
     Source/ReferenceJob.h
-    Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h Source/SungNotes.h Source/ToneSequence.h Source/Auditioner.h
+    Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h Source/SungNotes.h Source/EqMatch.h Source/ToneSequence.h Source/Auditioner.h
     Source/BlockEditor.h
     Source/BlockEditor.cpp
+    Source/EqView.h
+    Source/EqView.cpp
     ${VA_CORE_SOURCES})
 
 target_compile_definitions(VocalAssistor PUBLIC
@@ -80,6 +83,7 @@ target_compile_definitions(VocalAssistor PUBLIC
 target_link_libraries(VocalAssistor
     PRIVATE
         juce::juce_audio_utils
+        juce::juce_dsp
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags
@@ -125,6 +129,7 @@ target_link_libraries(BlockTests
         juce::juce_data_structures
         juce::juce_audio_basics
         juce::juce_audio_formats
+        juce::juce_dsp
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags
@@ -140,6 +145,7 @@ target_sources(HostTests PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/BlockEditor.cpp
+    Source/EqView.cpp
     ${VA_CORE_SOURCES})
 
 target_compile_definitions(HostTests PUBLIC
@@ -152,6 +158,7 @@ target_compile_definitions(HostTests PUBLIC
 target_link_libraries(HostTests
     PRIVATE
         juce::juce_audio_utils
+        juce::juce_dsp
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags

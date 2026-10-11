@@ -215,6 +215,123 @@ void liveMatchScenario()
     p->releaseResources();
 }
 
+void toneEqScenario()
+{
+    std::printf("\n== Tone matching EQ in the plugin ==\n");
+    const double sr = 48000.0;
+    std::mt19937 rng (21);
+    std::normal_distribution<float> nd (0.0f, 0.1f);
+
+    // the "Suno" reference file: 6 s of bright (white) noise
+    auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("va_tone_ref.wav");
+    wav.deleteFile();
+    {
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (new juce::FileOutputStream (wav), sr, 1, 16, {}, 0));
+        juce::AudioBuffer<float> b (1, (int) (6 * sr));
+        for (int i = 0; i < b.getNumSamples(); ++i) b.setSample (0, i, nd (rng));
+        w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+    }
+
+    auto p = std::make_unique<VocalAssistorProcessor>();
+    p->setPlayConfigDetails (1, 1, sr, 512);
+    p->prepareToPlay (sr, 512);
+    check (p->loadToneReference (wav), "tone reference measurement started");
+    int waited = 0;
+    while (! p->hasToneReference() && waited < 20000) { pump (50); waited += 50; }
+    check (p->hasToneReference(), "tone of the reference file measured");
+    wav.deleteFile();
+
+    // your voice: dark noise
+    float z = 0.0f;
+    const float a = 1.0f - std::exp (-2.0f * 3.14159265f * 2000.0f / 48000.0f);
+    auto darkBlock = [&] (juce::AudioBuffer<float>& b)
+    {
+        for (int i = 0; i < b.getNumSamples(); ++i) { z += a * (nd (rng) - z); b.setSample (0, i, z * 3.0f); }
+    };
+    juce::MidiBuffer midi;
+    p->setLearning (true);
+    for (int blk = 0; blk < 800; ++blk)           // about 8.5 s
+    {
+        juce::AudioBuffer<float> b (1, 512);
+        darkBlock (b);
+        p->processBlock (b, midi);
+        pump (2);
+    }
+    p->setLearning (false);
+    pump (200);
+    check (p->hasMyVoice() && p->myVoiceSeconds() > 6.0, "your voice learned");
+
+    // EQ still off: untouched
+    {
+        juce::AudioBuffer<float> b (1, 512), copy;
+        darkBlock (b); copy.makeCopyOf (b);
+        p->processBlock (b, midi);
+        check (std::memcmp (b.getReadPointer (0), copy.getReadPointer (0), 512 * sizeof (float)) == 0, "EQ off: audio is bit-identical");
+    }
+
+    auto setParam = [&] (const char* id, float v) { auto* q = p->apvts.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+    setParam ("eqOn", 1.0f);
+    pump (200);
+    for (int blk = 0; blk < 60; ++blk) { juce::AudioBuffer<float> b (1, 512); darkBlock (b); p->processBlock (b, midi); pump (2); }
+
+    // measure what comes out
+    va::BandSpectrum outSpec (sr), inSpec (sr);
+    for (int blk = 0; blk < 800; ++blk)
+    {
+        juce::AudioBuffer<float> b (1, 512), copy;
+        darkBlock (b); copy.makeCopyOf (b);
+        p->processBlock (b, midi);
+        outSpec.add (b.getReadPointer (0), 512);
+        inSpec.add (copy.getReadPointer (0), 512);
+    }
+    va::BandDb o {}, in {};
+    check (outSpec.result (o) && inSpec.result (in), "output measured");
+    auto err = [&] (const va::BandDb& x)
+    {
+        double md = 0, e = 0; int n = 0;
+        for (int i = 0; i < va::numBands; ++i) if (va::bandCentre (i) >= 100 && va::bandCentre (i) <= 8000) { md += x[(size_t) i] - p->refBands()[(size_t) i]; ++n; }
+        md /= n;
+        for (int i = 0; i < va::numBands; ++i) if (va::bandCentre (i) >= 100 && va::bandCentre (i) <= 8000) { const double d = x[(size_t) i] - p->refBands()[(size_t) i] - md; e += d * d; }
+        return std::sqrt (e / n);
+    };
+    std::printf ("  info tone error without EQ %.2f dB, with EQ %.2f dB\n", err (in), err (o));
+    check (err (o) < err (in) * 0.5, "EQ on: the voice's tone is much closer to the reference");
+    check (p->getLatencySamples() == 0, "still 0 samples of latency");
+
+    // amount 0 returns to the dry sound
+    setParam ("eqAmount", 0.0f);
+    pump (200);
+    for (int blk = 0; blk < 60; ++blk) { juce::AudioBuffer<float> b (1, 512); darkBlock (b); p->processBlock (b, midi); pump (2); }
+    {
+        juce::AudioBuffer<float> b (1, 512), copy;
+        darkBlock (b); copy.makeCopyOf (b);
+        p->processBlock (b, midi);
+        check (std::memcmp (b.getReadPointer (0), copy.getReadPointer (0), 512 * sizeof (float)) == 0, "amount 0 %: audio is bit-identical again");
+    }
+
+    // saved with the project
+    setParam ("eqAmount", 100.0f);
+    juce::MemoryBlock state;
+    p->getStateInformation (state);
+    auto q = std::make_unique<VocalAssistorProcessor>();
+    q->setStateInformation (state.getData(), (int) state.getSize());
+    bool same = q->hasToneReference() && q->hasMyVoice();
+    for (int i = 0; same && i < va::numBands; ++i) same = std::abs (q->eqCurve()[(size_t) i] - p->eqCurve()[(size_t) i]) < 0.01f;
+    check (same, "tone reference, your voice and the EQ curve come back with the project");
+
+    auto editor = std::unique_ptr<juce::AudioProcessorEditor> (p->createEditor());
+    pump (150);
+    if (auto* ed = dynamic_cast<VocalAssistorEditor*> (editor.get()))
+    {
+        ed->showToneTab();
+        pump (150);
+        snapshot (*editor, "7_tone_eq.png");
+    }
+    editor.reset();
+    p->releaseResources();
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -344,6 +461,7 @@ int main()
 
     proc->releaseResources();
     liveMatchScenario();
+    toneEqScenario();
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL HOST TESTS PASSED" : "HOST TESTS FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

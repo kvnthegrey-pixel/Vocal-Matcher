@@ -6,6 +6,9 @@
 #include "ReferenceJob.h"
 #include "PerformanceSource.h"
 #include "ToneSequence.h"
+#include "EqMatch.h"
+#include <mutex>
+#include <thread>
 
 /**
     Vocal Assistor, Phase 3: pass-through, pitch analysis and the reference blocks.
@@ -22,7 +25,7 @@ class VocalAssistorProcessor final : public juce::AudioProcessor,
 {
 public:
     VocalAssistorProcessor();
-    ~VocalAssistorProcessor() override { stopTimer(); reference.removeChangeListener (this); job.cancel(); }
+    ~VocalAssistorProcessor() override { stopTimer(); reference.removeChangeListener (this); job.cancel(); joinToneThread(); }
 
     const juce::String getName() const override { return JucePlugin_Name; }
 
@@ -51,7 +54,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    static constexpr int stateVersion = 3;
+    static constexpr int stateVersion = 4;
 
     // ---- reference vocal (message thread) --------------------------------
     /** Imports one track of a MIDI file as the reference. Returns an error message or empty. */
@@ -84,6 +87,22 @@ public:
         reqRef = refHz; reqSung = sungHz; reqLen = lengthSec;
         reqCounter.fetch_add (1);
     }
+    // ---- tone matching EQ (message thread) -------------------------------
+    /** Measures the tone of an audio file in the background and uses it as the target sound. */
+    bool loadToneReference (const juce::File&);
+    bool isToneBusy() const                 { return toneBusy.load(); }
+    bool hasToneReference() const           { return haveRef; }
+    bool hasMyVoice() const                 { return haveMine; }
+    juce::String getToneName() const        { return toneName; }
+    juce::String takeToneError()            { auto e = toneErrorMsg; toneErrorMsg.clear(); return e; }
+    void setLearning (bool on)              { learning = on; }
+    bool isLearning() const                 { return learning.load(); }
+    void clearMyVoice();
+    double myVoiceSeconds() const           { return mineSeconds; }
+    const va::BandDb& refBands() const      { return refDb; }
+    const va::BandDb& myBands() const       { return mineDb; }
+    const va::BandDb& eqCurve() const       { return corrCurve; }       // what the EQ is being asked to do, at 100%
+    int eqRevision() const                  { return eqRev; }
     /** Runs one timer tick's work now (tests). */
     void pumpPerformance()                            { updatePerformance(); }
 
@@ -98,6 +117,31 @@ private:
 
     va::Matcher matcherObj;
     va::TraceStore traceStore;
+    void joinToneThread();
+    void updateEq();
+    void applyEqTargets();
+
+    va::EqFilterBank eqBank;
+    std::atomic<bool> learning { false };
+    juce::AbstractFifo learnFifo { 1 << 16 };
+    std::vector<float> learnStore = std::vector<float> (1 << 16, 0.0f), learnScratch;
+    std::unique_ptr<va::BandSpectrum> mineSpec;
+    double mineSpecRate = 0.0, mineSeconds = 0.0;
+    va::BandDb refDb {}, mineDb {}, corrCurve {};
+    std::array<float, (size_t) va::numEqBands> solvedGains {};
+    bool haveRef = false, haveMine = false;
+    juce::String toneName, toneErrorMsg;
+    int eqRev = 0, tickCount = 0;
+    float lastEqAmount = -1.0f, lastEqOn = -1.0f;
+    std::atomic<float>* eqOnParam = nullptr;
+    std::atomic<float>* eqAmountParam = nullptr;
+    std::thread toneThread;
+    std::atomic<bool> toneBusy { false }, toneCancel { false }, toneDone { false };
+    std::mutex toneMutex;
+    va::BandDb toneResult {};
+    bool toneOk = false;
+    juce::String toneErr, toneFile;
+
     std::atomic<double> reqRef { 0.0 }, reqSung { 0.0 }, reqLen { 0.5 };
     std::atomic<int> reqCounter { 0 };
     int seenCounter = 0;
