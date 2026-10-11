@@ -34,7 +34,17 @@ jobs:
         run: cmake -S . -B build -A x64 "-DVA_VERSION_LABEL=${{ steps.ver.outputs.label }}"
 
       - name: Build plugin (Release)
-        run: cmake --build build --config Release --target VocalAssistor_VST3 --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target VocalAssistor_VST3 --parallel 2>&1 | Tee-Object -FilePath build-output.txt
+          if ($LASTEXITCODE -ne 0) {
+            # Surface the compiler errors as annotations so they can be read without downloading logs.
+            Select-String -Path build-output.txt -Pattern 'error' | Select-Object -First 12 | ForEach-Object {
+              $msg = ($_.Line -replace '[\r\n%]', ' ')
+              Write-Host "::error::$msg"
+            }
+            exit 1
+          }
 
       - name: Build and run the unit and host tests
         # Phase gate: a failing test fails the build.
