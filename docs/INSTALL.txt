@@ -1,6 +1,8 @@
 VOCAL ASSISTOR - INSTALL GUIDE
 ==============================
 
+The package holds two 64-bit VST3 plugins, Vocal Assistor and Vocal Chain (auto-tune,
+compressor, de-esser, colour and reverb; under Fx), for Windows and Cubase Pro 12.
 Vocal Assistor is a 64-bit VST3 plugin for Windows and Cubase Pro 12.
 It is for personal use. The files are not code-signed, so Windows will show
 warnings the first time. The steps below get past them.

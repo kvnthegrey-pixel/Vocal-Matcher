@@ -91,6 +91,49 @@ target_link_libraries(VocalAssistor
         juce::juce_recommended_warning_flags)
 
 # ---------------------------------------------------------------------------
+# Vocal Chain: second plugin (auto-tune, compressor, de-esser, colour, reverb)
+# ---------------------------------------------------------------------------
+set(VC_SOURCES
+    Source/Chain/ChainProcessor.cpp
+    Source/Chain/ChainEditor.cpp)
+
+juce_add_plugin(VocalChain
+    COMPANY_NAME                "Vocal Matcher"
+    PLUGIN_MANUFACTURER_CODE    VcMt
+    PLUGIN_CODE                 VcCh
+    FORMATS                     VST3
+    PRODUCT_NAME                "Vocal Chain"
+    BUNDLE_ID                   com.vocalmatcher.vocalchain
+    VST3_CATEGORIES             Fx
+    IS_SYNTH                    FALSE
+    NEEDS_MIDI_INPUT            FALSE
+    NEEDS_MIDI_OUTPUT           FALSE
+    IS_MIDI_EFFECT              FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD     FALSE)
+
+target_sources(VocalChain PRIVATE
+    ${VC_SOURCES}
+    Source/Chain/Dsp.h Source/Chain/Compressor.h Source/Chain/PitchCorrector.h
+    Source/Chain/PlateReverb.h Source/Chain/ChainEngine.h Source/Chain/ChainParams.h
+    Source/Chain/ChainProcessor.h Source/Chain/ChainEditor.h)
+
+target_compile_definitions(VocalChain PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+
+target_link_libraries(VocalChain
+    PRIVATE
+        juce::juce_audio_utils
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
 # Unit tests for the pitch tracker (Phase 2). Not part of the plugin.
 # ---------------------------------------------------------------------------
 juce_add_console_app(PitchTests PRODUCT_NAME "PitchTests")
@@ -159,6 +202,39 @@ target_link_libraries(HostTests
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Vocal Chain DSP tests (no plugin, no UI).
+# ---------------------------------------------------------------------------
+juce_add_console_app(ChainTests PRODUCT_NAME "ChainTests")
+target_sources(ChainTests PRIVATE tests/ChainTests.cpp)
+target_compile_definitions(ChainTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(ChainTests
+    PRIVATE
+        juce::juce_core
+        juce::juce_audio_basics
+        juce::juce_audio_processors
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# Headless host test for the Vocal Chain plugin (layouts, latency, presets, editor).
+juce_add_console_app(ChainHostTests PRODUCT_NAME "ChainHostTests")
+target_sources(ChainHostTests PRIVATE tests/ChainHostTests.cpp ${VC_SOURCES})
+target_compile_definitions(ChainHostTests PUBLIC
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JucePlugin_Name="Vocal Chain"
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+target_link_libraries(ChainHostTests
+    PRIVATE
+        juce::juce_audio_utils
         pitch_detector
     PUBLIC
         juce::juce_recommended_config_flags

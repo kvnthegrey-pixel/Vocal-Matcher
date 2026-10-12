@@ -36,7 +36,7 @@ jobs:
       - name: Build plugin (Release)
         shell: pwsh
         run: |
-          cmake --build build --config Release --target VocalAssistor_VST3 --parallel 2>&1 | Tee-Object -FilePath build-output.txt
+          cmake --build build --config Release --target VocalAssistor_VST3 VocalChain_VST3 --parallel 2>&1 | Tee-Object -FilePath build-output.txt
           if ($LASTEXITCODE -ne 0) {
             # Surface the compiler errors as annotations so they can be read without downloading logs.
             Select-String -Path build-output.txt -Pattern 'error' | Select-Object -First 12 | ForEach-Object {
@@ -50,7 +50,7 @@ jobs:
         # Phase gate: a failing test fails the build.
         shell: pwsh
         run: |
-          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests') {
+          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests', 'ChainTests', 'ChainHostTests') {
             cmake --build build --config Release --target $t --parallel 2>&1 | Tee-Object -FilePath "build-$t.txt"
             if ($LASTEXITCODE -ne 0) {
               Select-String -Path "build-$t.txt" -Pattern 'error' | Select-Object -First 10 | ForEach-Object { Write-Host ("::error::" + ($_.Line -replace '[\r\n%]', ' ')) }
@@ -58,7 +58,7 @@ jobs:
             }
           }
           $failed = @()
-          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests') {
+          foreach ($t in 'PitchTests', 'BlockTests', 'HostTests', 'ChainTests', 'ChainHostTests') {
             $exe = Get-ChildItem -Path build -Recurse -Filter "$t.exe" | Select-Object -First 1
             "===== $t =====" | Tee-Object -FilePath test-output.txt -Append
             $out = & $exe.FullName 2>&1 | Tee-Object -FilePath test-output.txt -Append
@@ -76,17 +76,21 @@ jobs:
         run: |
           $bundle = Get-ChildItem -Path build -Recurse -Directory -Filter "Vocal Assistor.vst3" | Select-Object -First 1
           if (-not $bundle) { throw "Vocal Assistor.vst3 was not produced" }
+          $chain = Get-ChildItem -Path build -Recurse -Directory -Filter "Vocal Chain.vst3" | Select-Object -First 1
+          if (-not $chain) { throw "Vocal Chain.vst3 was not produced" }
           Write-Host "Found $($bundle.FullName)"
+          Write-Host "Found $($chain.FullName)"
           "bundle=$($bundle.FullName)" >> $env:GITHUB_OUTPUT
+          "chain=$($chain.FullName)" >> $env:GITHUB_OUTPUT
           "dir=$($bundle.Parent.FullName)" >> $env:GITHUB_OUTPUT
-          Get-ChildItem -Path $bundle.FullName -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+          "chaindir=$($chain.Parent.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Zip the .vst3 folder
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $zip = "dist/VocalAssistor-${{ steps.ver.outputs.label }}-win64-vst3.zip"
-          Compress-Archive -Path "${{ steps.find.outputs.bundle }}" -DestinationPath $zip -Force
+          Compress-Archive -Path "${{ steps.find.outputs.bundle }}", "${{ steps.find.outputs.chain }}" -DestinationPath $zip -Force
           Copy-Item docs/INSTALL.txt dist/INSTALL.txt
 
       - name: Build the Inno Setup installer
@@ -94,7 +98,7 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DAppVersion=${{ steps.ver.outputs.label }}" "/DBuildDir=${{ steps.find.outputs.dir }}" "/O$PWD\dist" installer\VocalAssistor.iss
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.label }}" "/DBuildDir=${{ steps.find.outputs.dir }}" "/DChainDir=${{ steps.find.outputs.chaindir }}" "/O$PWD\dist" installer\VocalAssistor.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
           Get-ChildItem dist
 
