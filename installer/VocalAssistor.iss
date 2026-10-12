@@ -9,6 +9,9 @@
 #ifndef ChainDir
   #define ChainDir "..\build\VocalChain_artefacts\Release\VST3"
 #endif
+#ifndef StackDir
+  #define StackDir "..\build\VocalStack_artefacts\Release\VST3"
+#endif
 #ifndef BuildDir
   #define BuildDir "..\build\VocalAssistor_artefacts\Release\VST3"
 #endif
@@ -35,6 +38,7 @@ WizardStyle=modern
 [Files]
 Source: "{#BuildDir}\Vocal Assistor.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal Assistor.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ChainDir}\Vocal Chain.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal Chain.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StackDir}\Vocal Stack.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal Stack.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Messages]
-FinishedLabel=Vocal Assistor and Vocal Chain were installed to C:\Program Files\Common Files\VST3.%n%nIn Cubase, open Studio > VST Plug-in Manager and update the list so the plugin appears.
+FinishedLabel=Vocal Assistor, Vocal Chain and Vocal Stack were installed to C:\Program Files\Common Files\VST3.%n%nIn Cubase, open Studio > VST Plug-in Manager and update the list so the plugin appears.

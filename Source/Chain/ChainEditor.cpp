@@ -121,8 +121,8 @@ VocalChainEditor::~VocalChainEditor()
 
 void VocalChainEditor::timerCallback()
 {
-    grDb = proc.engine.gainReductionDb();
-    deessDb = proc.engine.deessCutDb();
+    grDb = std::abs (proc.engine.gainReductionDb());
+    deessDb = std::abs (proc.engine.deessCutDb());
     inPk = proc.engine.inputPeak();
     outPk = proc.engine.outputPeak();
     detMidi = proc.engine.detectedMidi();

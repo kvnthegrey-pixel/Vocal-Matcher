@@ -134,6 +134,46 @@ target_link_libraries(VocalChain
         juce::juce_recommended_warning_flags)
 
 # ---------------------------------------------------------------------------
+# Vocal Stack: third plugin (stacked, hard, upfront vocal texture)
+# ---------------------------------------------------------------------------
+set(VS_SOURCES
+    Source/Stack/StackProcessor.cpp
+    Source/Stack/StackEditor.cpp)
+
+juce_add_plugin(VocalStack
+    COMPANY_NAME                "Vocal Matcher"
+    PLUGIN_MANUFACTURER_CODE    VcMt
+    PLUGIN_CODE                 VcSt
+    FORMATS                     VST3
+    PRODUCT_NAME                "Vocal Stack"
+    BUNDLE_ID                   com.vocalmatcher.vocalstack
+    VST3_CATEGORIES             Fx
+    IS_SYNTH                    FALSE
+    NEEDS_MIDI_INPUT            FALSE
+    NEEDS_MIDI_OUTPUT           FALSE
+    IS_MIDI_EFFECT              FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD     FALSE)
+
+target_sources(VocalStack PRIVATE
+    ${VS_SOURCES}
+    Source/Stack/StackEngine.h Source/Stack/StackParams.h Source/Stack/StackProcessor.h Source/Stack/StackEditor.h)
+
+target_compile_definitions(VocalStack PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+
+target_link_libraries(VocalStack
+    PRIVATE
+        juce::juce_audio_utils
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
 # Unit tests for the pitch tracker (Phase 2). Not part of the plugin.
 # ---------------------------------------------------------------------------
 juce_add_console_app(PitchTests PRODUCT_NAME "PitchTests")
@@ -236,6 +276,22 @@ target_link_libraries(ChainHostTests
     PRIVATE
         juce::juce_audio_utils
         pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# Vocal Stack DSP + host tests (one console app).
+juce_add_console_app(StackTests PRODUCT_NAME "StackTests")
+target_sources(StackTests PRIVATE tests/StackTests.cpp ${VS_SOURCES})
+target_compile_definitions(StackTests PUBLIC
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JucePlugin_Name="Vocal Stack"
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+target_link_libraries(StackTests
+    PRIVATE
+        juce::juce_audio_utils
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
