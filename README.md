@@ -18,6 +18,18 @@ Personal use only. No pitch correction, no lyrics, no harmonies, no change to yo
 
 See `docs/PHASE3_REPORT.md` for the current checklist and findings.
 
+## Performance Assist (fourth plugin)
+
+A separate coaching plugin for singing against the Suno vocal. Load the reference, press play in Cubase and sing:
+
+- **Your voice is drawn as a wave** that rides at the height of the note you are singing, gets thicker when you are louder, and flows into the note blocks. It is green inside Perfect, amber inside Good, red when off, and an orange banner says when you are an octave high or low.
+- **Every note is graded** Perfect (within 25 cents), Good (within 50 cents) or Miss, with a score, a streak multiplier (up to x4) and accuracy. The start of each note is forgiven (a scoop up to pitch), vibrato is averaged out, and a 50 ms consonant gap is not a mistake. All of these are settings.
+- **Practise** one phrase at a time (it shows the times to type into Cubase's cycle locators; the plugin cannot set the cycle itself), or switch to **Ghost** mode so only the first note of each phrase is shown and the rest appear once graded.
+- **Takes**: every pass (stop, or a loop jump) is kept with a score, a heatmap of where each note landed (flat, centred, sharp, octave slip), a plain-language read of your tendencies, and a **comp plan** that names the best take for each phrase.
+- **Edit reference** fixes wrong blocks from the Suno stem (split, merge, delete, shift, lock).
+
+The audio is an exact pass-through and the plugin reports no latency. See `docs/PERFORMANCE_ASSIST.md`.
+
 ## Install
 
 See `docs/INSTALL.txt`.

@@ -174,6 +174,80 @@ target_link_libraries(VocalStack
         juce::juce_recommended_warning_flags)
 
 # ---------------------------------------------------------------------------
+# Performance Assist: fourth plugin (coaching: your voice as a wave hitting the
+# note blocks, scoring, takes, heatmap, comp plan). Separate from Vocal Assistor;
+# it shares only the pitch engine and the reference-vocal analysis code.
+# ---------------------------------------------------------------------------
+set(PA_SOURCES
+    Source/Assist/AssistProcessor.cpp
+    Source/Assist/AssistEditor.cpp
+    Source/Assist/GameView.cpp
+    Source/Assist/TakesView.cpp
+    Source/BlockEditor.cpp
+    ${VA_CORE_SOURCES})
+
+set(PA_HEADERS
+    Source/Assist/AssistProcessor.h Source/Assist/AssistEditor.h Source/Assist/GameView.h Source/Assist/TakesView.h
+    Source/Assist/ScoreKeeper.h Source/Assist/TakeStore.h Source/Assist/EnvelopeStore.h
+    Source/BlockEditor.h Source/PitchEngine.h Source/PitchTracker.h Source/NoteBlocks.h
+    Source/ReferenceModel.h Source/ReferenceJob.h Source/Matcher.h Source/TraceStore.h Source/PerformanceSource.h Source/SungNotes.h)
+
+juce_add_plugin(PerformanceAssist
+    COMPANY_NAME                "Vocal Matcher"
+    PLUGIN_MANUFACTURER_CODE    VcMt
+    PLUGIN_CODE                 VcPa
+    FORMATS                     VST3
+    PRODUCT_NAME                "Performance Assist"
+    BUNDLE_ID                   com.vocalmatcher.performanceassist
+    VST3_CATEGORIES             Fx Analyzer
+    IS_SYNTH                    FALSE
+    NEEDS_MIDI_INPUT            FALSE
+    NEEDS_MIDI_OUTPUT           FALSE
+    IS_MIDI_EFFECT              FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD     FALSE)
+
+target_sources(PerformanceAssist PRIVATE ${PA_SOURCES} ${PA_HEADERS})
+
+target_compile_definitions(PerformanceAssist PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+
+target_link_libraries(PerformanceAssist
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# Scoring, takes and envelope tests: plain C++, no JUCE.
+add_executable(AssistCoreTests tests/AssistCoreTests.cpp
+    Source/Assist/ScoreKeeper.h Source/Assist/TakeStore.h Source/Assist/EnvelopeStore.h Source/NoteBlocks.h)
+
+# Headless host test for Performance Assist: the real processor and editor without Cubase.
+juce_add_console_app(AssistHostTests PRODUCT_NAME "AssistHostTests")
+target_sources(AssistHostTests PRIVATE tests/AssistHostTests.cpp ${PA_SOURCES} ${PA_HEADERS})
+target_compile_definitions(AssistHostTests PUBLIC
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JucePlugin_Name="Performance Assist"
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+target_link_libraries(AssistHostTests
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
 # Unit tests for the pitch tracker (Phase 2). Not part of the plugin.
 # ---------------------------------------------------------------------------
 juce_add_console_app(PitchTests PRODUCT_NAME "PitchTests")
