@@ -369,3 +369,90 @@ target_link_libraries(StackTests
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Mix Seat: fifth plugin (upload a beat, it nudges the vocal EQ so the voice sits in the
+# gaps the beat leaves). Separate from the others; it shares only the spectrum measuring
+# and EQ filter code in Source/EqMatch.h and the audio decoder in Source/ReferenceModel.cpp.
+# ---------------------------------------------------------------------------
+set(MS_SOURCES
+    Source/Seat/SeatProcessor.cpp
+    Source/Seat/SeatEditor.cpp
+    ${VA_CORE_SOURCES})
+
+set(MS_HEADERS
+    Source/Seat/SeatProcessor.h Source/Seat/SeatEditor.h Source/Seat/SeatEngine.h
+    Source/EqMatch.h Source/ReferenceModel.h)
+
+juce_add_plugin(MixSeat
+    COMPANY_NAME                "Vocal Matcher"
+    PLUGIN_MANUFACTURER_CODE    VcMt
+    PLUGIN_CODE                 VcMs
+    FORMATS                     VST3
+    PRODUCT_NAME                "Mix Seat"
+    BUNDLE_ID                   com.vocalmatcher.mixseat
+    VST3_CATEGORIES             Fx EQ
+    IS_SYNTH                    FALSE
+    NEEDS_MIDI_INPUT            FALSE
+    NEEDS_MIDI_OUTPUT           FALSE
+    IS_MIDI_EFFECT              FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD     FALSE)
+
+target_sources(MixSeat PRIVATE ${MS_SOURCES} ${MS_HEADERS})
+
+target_compile_definitions(MixSeat PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+
+target_link_libraries(MixSeat
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# Maths tests for Mix Seat (profiles, the nudge, the plan, reasons, saved text).
+juce_add_console_app(SeatCoreTests PRODUCT_NAME "SeatCoreTests")
+target_sources(SeatCoreTests PRIVATE tests/SeatCoreTests.cpp ${VA_CORE_SOURCES} Source/Seat/SeatEngine.h)
+target_compile_definitions(SeatCoreTests PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1)
+target_link_libraries(SeatCoreTests
+    PRIVATE
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# Headless host test for Mix Seat: the real processor and editor without Cubase.
+juce_add_console_app(SeatHostTests PRODUCT_NAME "SeatHostTests")
+target_sources(SeatHostTests PRIVATE tests/SeatHostTests.cpp ${MS_SOURCES} ${MS_HEADERS})
+target_compile_definitions(SeatHostTests PUBLIC
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1
+    JucePlugin_Name="Mix Seat"
+    VA_VERSION_LABEL="${VA_VERSION_LABEL}")
+target_link_libraries(SeatHostTests
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+        pitch_detector
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)

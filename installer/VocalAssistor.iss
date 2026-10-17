@@ -15,6 +15,9 @@
 #ifndef AssistDir
   #define AssistDir "..\build\PerformanceAssist_artefacts\Release\VST3"
 #endif
+#ifndef SeatDir
+  #define SeatDir "..\build\MixSeat_artefacts\Release\VST3"
+#endif
 #ifndef BuildDir
   #define BuildDir "..\build\VocalAssistor_artefacts\Release\VST3"
 #endif
@@ -43,6 +46,7 @@ Source: "{#BuildDir}\Vocal Assistor.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal A
 Source: "{#ChainDir}\Vocal Chain.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal Chain.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StackDir}\Vocal Stack.vst3\*"; DestDir: "{commoncf64}\VST3\Vocal Stack.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#AssistDir}\Performance Assist.vst3\*"; DestDir: "{commoncf64}\VST3\Performance Assist.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SeatDir}\Mix Seat.vst3\*"; DestDir: "{commoncf64}\VST3\Mix Seat.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Messages]
-FinishedLabel=Vocal Assistor, Vocal Chain, Vocal Stack and Performance Assist were installed to C:\Program Files\Common Files\VST3.%n%nIn Cubase, open Studio > VST Plug-in Manager and update the list so the plugin appears.
+FinishedLabel=Vocal Assistor, Vocal Chain, Vocal Stack, Performance Assist and Mix Seat were installed to C:\Program Files\Common Files\VST3.%n%nIn Cubase, open Studio > VST Plug-in Manager and update the list so the plugin appears.

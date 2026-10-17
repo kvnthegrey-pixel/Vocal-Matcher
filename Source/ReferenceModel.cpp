@@ -207,7 +207,11 @@ bool decodeToMono (const juce::File& file, std::vector<float>& mono, double& sam
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
     if (reader == nullptr)
     {
+#if JUCE_USE_MP3AUDIOFORMAT
+        error = "This audio file could not be opened. WAV, AIFF, FLAC, OGG and MP3 are supported.";
+#else
         error = "This audio file could not be opened. WAV, AIFF, FLAC and OGG are supported.";
+#endif
         return false;
     }
     sampleRate = reader->sampleRate;

@@ -30,6 +30,18 @@ A separate coaching plugin for singing against the Suno vocal. Load the referenc
 
 The audio is an exact pass-through and the plugin reports no latency. See `docs/PERFORMANCE_ASSIST.md`.
 
+## Mix Seat (fifth plugin)
+
+A separate plugin for seating the vocal in a beat. Put it on the vocal track, press **Upload beat...** and choose the instrumental, then play the vocal through the track:
+
+- It **measures the beat** (the whole song, and every 4 seconds of it) and **learns your vocal** from what plays through the plugin (about 3 seconds of loud singing is enough), or from a dry vocal file.
+- It then nudges the vocal's 12-band EQ: **eases it back where the beat is crowded** (often the low-mids) and **lifts it where the beat leaves room**. Loudness and the natural brightness of either track are ignored; only the bumps and dips count.
+- The screen shows the beat and vocal shapes, the EQ it is applying, and **a plain-language reason for each move**.
+- **Follow the beat through the song** changes the EQ as the beat changes (set "Beat starts at" if the beat does not start at the beginning of the project). Otherwise it uses the whole-song average.
+- Amount, biggest change, bypass, output trim and a switch to stop learning. Zero latency; with nothing loaded the audio is untouched.
+
+It is a heuristic, not a law: the importance of each frequency region and the strengths are starting values to tune by ear. See `docs/MIX_SEAT.md`.
+
 ## Install
 
 See `docs/INSTALL.txt`.

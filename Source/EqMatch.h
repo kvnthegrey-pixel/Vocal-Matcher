@@ -65,7 +65,7 @@ public:
 
     /** Average spectrum in dB over the frames that count (loud enough: within
         25 dB of the 90th-percentile level, and above -55 dBFS). False if fewer than ~1 s qualify. */
-    bool result (BandDb& out) const
+    bool result (BandDb& out, double* usedSeconds = nullptr) const
     {
         if (frames.empty()) return false;
         std::vector<float> r = rms;
@@ -81,6 +81,7 @@ public:
             for (size_t b = 0; b < (size_t) numBands; ++b) sum[b] += frames[f][b];
             ++used;
         }
+        if (usedSeconds != nullptr) *usedSeconds = (double) used * hop / sr;
         if ((double) used * hop / sr < 1.0) return false;
         for (size_t b = 0; b < (size_t) numBands; ++b)
             out[b] = (float) (10.0 * std::log10 (sum[b] / (double) used + 1.0e-20));
